@@ -1,0 +1,64 @@
+# claw-voice-bridge - Beispielkonfiguration
+# Kopieren nach config.toml und an die eigene Umgebung anpassen:
+#   cp config.example.toml config.toml
+
+[audio]
+# Name des CoreAudio-Eingabegeräts (siehe `system_profiler SPAudioDataType`
+# oder Systemeinstellungen > Ton > Eingabe). Leer/auskommentiert = Systemstandard.
+# device = "MacBook Pro Mikrofon"
+
+[wakeword]
+# Konfigurierbares, lokal laufendes Wake-Word-Kommando - keine Cloud-API.
+# Vertrag: Das Kommando läuft im Vordergrund und schreibt bei Erkennung eine
+# Zeile auf stdout, die den String aus `trigger_pattern` enthält, danach darf
+# es sich beenden (claw-voice-bridge startet es bei jedem Zyklus neu).
+# Beispiel-Implementierungen: ein kleines Python-/Rust-Skript um openWakeWord
+# oder Porcupine herum, das genau dieses stdout-Protokoll spricht.
+command = "openwakeword-listener"
+args = ["--model", "hey_claw"]
+trigger_pattern = "WAKE"
+restart_delay_ms = 500
+
+[vad]
+# Stille-Timeout: Aufnahme endet, nachdem nach erkannter Sprache diese
+# Zeit lang RMS-Energie unter dem Schwellwert lag.
+silence_timeout_ms = 4000
+# Harte Obergrenze für eine einzelne Aufnahme.
+max_recording_seconds = 60
+# RMS-Schwellwert (0.0-1.0) für "Sprache erkannt". Ggf. je nach Mikrofon/
+# Raum anpassen.
+silence_rms_threshold = 0.02
+# Mindestdauer erkannter Sprache, bevor Stille danach zum Stopp führen darf
+# (verhindert, dass ein kurzes Klick-Geräusch die Aufnahme sofort beendet).
+min_speech_ms = 300
+# Analysefenster für die VAD-Energiemessung.
+frame_ms = 30
+
+[whisper]
+binary = "whisper-cli"
+model_path = "/Users/mac-mini/.openclaw/workspace/state/whisper.cpp-model-large-v3-turbo/ggml-large-v3-turbo.bin"
+language = "de"
+extra_args = []
+timeout_secs = 60
+
+[openclaw]
+binary = "openclaw"
+# WICHTIG: muss explizit gesetzt werden. Es gibt KEINEN automatischen
+# Fallback auf die Main-Session - ein leerer Wert führt zum Abbruch.
+target_channel = "voice-assistant"
+extra_args = []
+timeout_secs = 30
+
+[tts]
+piper_binary = "piper"
+voice = "de_DE-thorsten-high"
+# Alternativ direkter Modellpfad statt Stimmenname:
+# model_path = "/Users/mac-mini/.local/share/piper/de_DE-thorsten-high.onnx"
+extra_args = []
+player_binary = "afplay"
+timeout_secs = 30
+
+[general]
+ffmpeg_binary = "ffmpeg"
+# temp_dir = "/tmp"
+log_level = "info"
