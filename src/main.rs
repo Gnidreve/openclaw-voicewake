@@ -15,8 +15,13 @@ use state::{State, StateMachine};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+/// Wie oft der Shutdown-Flag während eines blockierenden Warteschritts
+/// (z. B. Wake-Word-Erkennung) auf ein Signal geprüft wird.
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,6 +58,12 @@ async fn main() -> Result<()> {
         if let Err(e) = run_cycle(&cfg, &cli, &mut sm, &shutdown).await {
             error!(error = %e, from = %sm.current(), "Fehler im Zyklus - kehre zu IDLE zurück");
             let _ = sm.transition(State::Idle);
+
+            // Verhindert einen ungebremsten Busy-Loop, falls z. B. das
+            // Wake-Word-Kommando dauerhaft fehlschlägt (fehlende Binary o. Ä.).
+            if !cli.once && !shutdown.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(cfg.wakeword.restart_delay_ms)).await;
+            }
         }
 
         if cli.once {
@@ -70,6 +81,20 @@ fn init_logging(level: &str) {
         .with_env_filter(filter)
         .with_target(false)
         .init();
+}
+
+/// Pollt den Shutdown-Flag, bis er gesetzt ist. Dient dazu, blockierende
+/// Warteschritte (z. B. die Wake-Word-Erkennung, die sonst unbegrenzt lang
+/// laufen kann) per `tokio::select!` gegen ein SIGINT/SIGTERM abzubrechen,
+/// damit der Dienst auch im Leerlauf sauber auf Ctrl+C reagiert.
+async fn wait_for_shutdown(shutdown: &AtomicBool) {
+    let mut interval = tokio::time::interval(SHUTDOWN_POLL_INTERVAL);
+    loop {
+        interval.tick().await;
+        if shutdown.load(Ordering::SeqCst) {
+            return;
+        }
+    }
 }
 
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>) {
@@ -123,7 +148,13 @@ async fn run_cycle_inner(
     if cli.dry_run {
         info!("[dry-run] Wake-Word wird simuliert erkannt");
     } else {
-        wakeword::wait_for_wakeword(&cfg.wakeword).await?;
+        tokio::select! {
+            result = wakeword::wait_for_wakeword(&cfg.wakeword) => result?,
+            _ = wait_for_shutdown(shutdown) => {
+                sm.transition(State::Idle)?;
+                return Ok(());
+            }
+        }
     }
 
     if shutdown.load(Ordering::SeqCst) {
@@ -268,5 +299,31 @@ fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {
 fn cleanup_temp_dir(dir: &PathBuf) {
     if let Err(e) = std::fs::remove_dir_all(dir) {
         warn!(error = %e, dir = %dir.display(), "Konnte temporäres Verzeichnis nicht vollständig löschen");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn wait_for_shutdown_resolves_once_flag_is_set() {
+        let flag = AtomicBool::new(true);
+        tokio::time::timeout(Duration::from_secs(1), wait_for_shutdown(&flag))
+            .await
+            .expect(
+                "wait_for_shutdown sollte sofort zurückkehren, wenn der Flag bereits gesetzt ist",
+            );
+    }
+
+    #[tokio::test]
+    async fn wait_for_shutdown_does_not_resolve_while_unset() {
+        let flag = AtomicBool::new(false);
+        let result =
+            tokio::time::timeout(Duration::from_millis(500), wait_for_shutdown(&flag)).await;
+        assert!(
+            result.is_err(),
+            "wait_for_shutdown darf nicht zurückkehren, solange der Flag nicht gesetzt ist"
+        );
     }
 }

@@ -20,7 +20,8 @@ pub async fn play_chime(cfg: &SoundConfig) -> Result<()> {
     let mut cmd = Command::new(&cfg.player_binary);
     cmd.arg(&cfg.chime_path)
         .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let child = cmd
         .spawn()

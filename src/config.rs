@@ -18,6 +18,9 @@ pub struct WakeWordConfig {
     pub command: String,
     pub args: Vec<String>,
     pub trigger_pattern: String,
+    /// Wartezeit vor einem erneuten Zyklusstart, nachdem ein Zyklus (i. d. R.
+    /// wegen eines fehlgeschlagenen Wake-Word-Kommandos) mit Fehler
+    /// abgebrochen wurde - verhindert einen ungebremsten Busy-Loop.
     pub restart_delay_ms: u64,
 }
 impl Default for WakeWordConfig {

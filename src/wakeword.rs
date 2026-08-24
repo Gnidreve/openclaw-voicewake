@@ -18,7 +18,11 @@ pub async fn wait_for_wakeword(cfg: &WakeWordConfig) -> Result<()> {
     let mut cmd = Command::new(&cfg.command);
     cmd.args(&cfg.args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        // Falls diese Funktion (z. B. durch ein Shutdown-Signal) abgebrochen
+        // wird, bevor der Wake-Word-Prozess selbst beendet ist, muss der
+        // Prozess mit sterben statt verwaist weiterzulaufen.
+        .kill_on_drop(true);
 
     info!(command = %cfg.command, "Starte Wake-Word-Erkennung");
 

@@ -35,7 +35,12 @@ pub async fn normalize_audio(
     info!(?input, ?output, "Normalisiere Audio mit ffmpeg");
 
     let mut cmd = Command::new(&general.ffmpeg_binary);
-    cmd.args(&args).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        // Sonst würde ffmpeg bei Timeout verwaist weiterlaufen statt beendet
+        // zu werden - der Prozess stirbt mit dem Drop des Child-Handles.
+        .kill_on_drop(true);
 
     let child = cmd.spawn().context("Kann ffmpeg nicht starten")?;
     let out = timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
@@ -83,7 +88,8 @@ pub async fn transcribe(cfg: &WhisperConfig, wav_path: &Path, tmp_dir: &Path) ->
     let mut cmd = Command::new(&cfg.binary);
     cmd.args(&args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let child = cmd.spawn().context("Kann whisper-cli nicht starten")?;
     let out = timeout(

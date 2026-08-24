@@ -37,7 +37,8 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let mut child = cmd.spawn().context("Kann Piper nicht starten")?;
     {
@@ -68,7 +69,10 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
 async fn play_wav(cfg: &TtsConfig, path: &Path) -> Result<()> {
     info!(?path, "Spiele Antwort über Standardausgabegerät ab");
     let mut cmd = Command::new(&cfg.player_binary);
-    cmd.arg(path).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let child = cmd
         .spawn()

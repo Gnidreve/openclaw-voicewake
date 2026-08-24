@@ -34,7 +34,8 @@ pub async fn send_to_openclaw(cfg: &OpenClawConfig, transcript: &str) -> Result<
     let mut cmd = Command::new(&cfg.binary);
     cmd.args(&args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     let child = cmd.spawn().context("Kann OpenClaw-CLI nicht starten")?;
     let out = timeout(
