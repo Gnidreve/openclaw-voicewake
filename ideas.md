@@ -117,3 +117,18 @@ reiner Adapter-Workaround.
 Ein kleiner **read-only Streaming-Prototyp** im Adapter, der die
 WebSocket-Events zunächst nur protokolliert (`chat`, `session.message`,
 `session.operation`, `session.tool`) - bevor Audio/Piper daran gehängt wird.
+
+## Paketierung: Hintergrunddienst mit Menüleisten-Icon (wie Tailscale)
+
+Ergänzung zu Punkt 10 oben ("als dauerhaften macOS-Hintergrunddienst
+paketieren") - konkrete Anforderungen an das spätere Packaging:
+
+- Muss ein **vollständiger Hintergrundtask** sein: läuft ohne offenes
+  Fenster, kein Dock-Icon/Vordergrund-App-Zwang.
+- Ein Fenster (Status/Konfiguration) soll sich bei Bedarf öffnen lassen -
+  **Schließen des Fensters darf den Task aber nicht beenden**. Fenster
+  und Hintergrunddienst sind entkoppelt.
+- Lebt dauerhaft als **Menüleisten-Icon** (macOS-Pendant zur rechten
+  Windows-Taskleiste), vergleichbar mit der Tailscale-Menüleisten-App.
+- Über das Menüleisten-Icon: **An/Aus-Toggle** zum kompletten
+  Aktivieren/Deaktivieren des Dienstes.
