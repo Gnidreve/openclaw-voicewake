@@ -15,8 +15,6 @@ Audioaufzeichnung.
 ```
 IDLE → LISTENING_FOR_WAKEWORD → RECORDING → TRANSCRIBING
      → SENDING_TO_OPENCLAW → SPEAKING → IDLE
-                                 │
-                                 └──→ RECORDING (Folgeeingabe, kein Wake-Word nötig)
 ```
 
 Jeder Zwischenzustand kann bei Fehlern/Timeouts direkt zurück nach `IDLE`
@@ -24,15 +22,6 @@ springen, damit der Dienst nicht hängen bleibt. Während `SPEAKING` läuft
 keine Wake-Word-Erkennung (sie wird nur im Zustand
 `LISTENING_FOR_WAKEWORD` gestartet) - die eigene TTS-Ausgabe kann sich
 also nicht selbst erneut triggern.
-
-Nach einer vorgelesenen Antwort bleibt der Kanal offen: `SPEAKING` springt
-direkt zurück nach `RECORDING` (mit Start-/Ende-Ton wie gewohnt, siehe
-[Bestätigungstöne](#bestätigungstöne)), sodass eine Folgeeingabe ohne
-erneutes Wake-Word möglich ist - dieselbe VAD-/Timeout-Logik wie beim
-ersten Aufnahmedurchgang gilt auch hier. Bleibt diese Folgeaufnahme ohne
-erkannte Sprache (leeres Transkript) oder liefert OpenClaw keine Antwort,
-wird der Kanal mit einem zusätzlichen Ton als geschlossen markiert und der
-Dienst geht nach `IDLE` zurück - ab dann ist wieder das Wake-Word nötig.
 
 ## Voraussetzungen
 
@@ -105,10 +94,7 @@ claw-voice-bridge --config config.toml
 
 Der Dienst läuft dauerhaft im Vordergrund (Zustandsmaschine in Endlosschleife)
 und beendet sich sauber bei `Ctrl+C` (SIGINT) oder `SIGTERM`. Mit `--once`
-wird nur ein einzelner Zyklus ausgeführt - hilfreich zum Testen. Ein
-"Zyklus" beginnt dabei immer mit dem Wake-Word, kann aber intern mehrere
-Gesprächsrunden umfassen, solange der Kanal offen bleibt (siehe
-[Zustandsmaschine](#zustandsmaschine)).
+wird nur ein einzelner Zyklus ausgeführt - hilfreich zum Testen.
 
 ## Dry-Run (ohne Mikrofon)
 
@@ -123,13 +109,6 @@ läuft **real** über die konfigurierten Kommandos - so wird der komplette
 Verarbeitungspfad getestet, nur der Mikrofonteil wird ersetzt. Sind
 `whisper-cli`/`piper`/`openclaw` nicht installiert, schlägt der jeweilige
 Schritt mit einer klaren Fehlermeldung fehl (kein Absturz).
-
-Ein Dry-Run-Durchlauf bleibt dabei immer einmalig, auch wenn Transkript und
-OpenClaw-Antwort nicht leer sind: Anders als im Realbetrieb öffnet
-`claw-voice-bridge` den Kanal danach **nicht** für eine Folgeeingabe (siehe
-[Zustandsmaschine](#zustandsmaschine)), da im Dry-Run sonst dieselbe
-`--dry-run-file` erneut "aufgenommen" würde - das würde bei erkannter
-Sprache sonst zu einer Endlosschleife mit identischer Eingabe führen.
 
 ## CLI-Adapter-Verträge
 
@@ -168,14 +147,6 @@ standardmäßig der macOS-Systemsound "Glass"
 `sound.chime_path`. Mit `sound.enabled = false` lässt sich das abschalten.
 Ein fehlgeschlagener Bestätigungston (z. B. `afplay` nicht gefunden) wird
 nur geloggt und bricht den laufenden Zyklus nicht ab.
-
-Zusätzlich gibt es einen dritten Fall: Endet eine **Folgeaufnahme** (siehe
-[Zustandsmaschine](#zustandsmaschine)) ohne erkannte Sprache oder ohne
-Antwort von OpenClaw, wird derselbe Ton noch einmal abgespielt, um das
-Schließen des Kanals zu markieren - danach ist wieder das Wake-Word nötig.
-Beim allerersten Aufnahmedurchgang nach dem Wake-Word passiert das
-bewusst nicht, um keinen zusätzlichen Ton bei jedem stillen/leeren
-Durchgang zu erzeugen.
 
 ## Performance-Hinweise
 

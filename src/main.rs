@@ -162,84 +162,53 @@ async fn run_cycle_inner(
         return Ok(());
     }
 
-    // Solange eine Runde tatsächlich eine Antwort hervorbringt, bleibt der
-    // Kanal für eine direkte Folgeeingabe offen - ohne dass das Wake-Word
-    // erneut gesagt werden muss. Erst eine Runde ohne Sprache/Antwort
-    // schließt den Kanal wieder (mit Ton als Signal, siehe unten).
-    let mut is_followup_turn = false;
+    sm.transition(State::Recording)?;
+    let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
+    if cli.dry_run {
+        let source = cli
+            .dry_run_file
+            .clone()
+            .context("Im Dry-Run wird eine Beispieldatei benötigt (--dry-run-file)")?;
+        tokio::fs::copy(&source, &raw_wav)
+            .await
+            .with_context(|| format!("Kann Beispieldatei nicht kopieren: {}", source.display()))?;
+        info!(file = %source.display(), "[dry-run] verwende Beispieldatei als Aufnahme");
+    } else {
+        record_until_silence(cfg, &raw_wav).await?;
+    }
 
-    loop {
-        if shutdown.load(Ordering::SeqCst) {
-            sm.transition(State::Idle)?;
-            return Ok(());
-        }
+    sm.transition(State::Transcribing)?;
+    let normalized_wav = tmp_dir.join("normalized.wav");
+    transcribe::normalize_audio(
+        &cfg.general,
+        &raw_wav,
+        &normalized_wav,
+        cfg.whisper.timeout_secs,
+    )
+    .await?;
+    let transcript = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
+    info!(%transcript, "Transkription abgeschlossen");
 
-        sm.transition(State::Recording)?;
-        let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
-        if cli.dry_run {
-            let source = cli
-                .dry_run_file
-                .clone()
-                .context("Im Dry-Run wird eine Beispieldatei benötigt (--dry-run-file)")?;
-            tokio::fs::copy(&source, &raw_wav).await.with_context(|| {
-                format!("Kann Beispieldatei nicht kopieren: {}", source.display())
-            })?;
-            info!(file = %source.display(), "[dry-run] verwende Beispieldatei als Aufnahme");
-        } else {
-            record_until_silence(cfg, &raw_wav).await?;
-        }
+    sm.transition(State::SendingToOpenClaw)?;
+    let response = if transcript.trim().is_empty() {
+        warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
+        String::new()
+    } else {
+        openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await?
+    };
 
-        sm.transition(State::Transcribing)?;
-        let normalized_wav = tmp_dir.join("normalized.wav");
-        transcribe::normalize_audio(
-            &cfg.general,
-            &raw_wav,
-            &normalized_wav,
-            cfg.whisper.timeout_secs,
-        )
-        .await?;
-        let transcript = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
-        info!(%transcript, "Transkription abgeschlossen");
-
-        sm.transition(State::SendingToOpenClaw)?;
-        let response = if transcript.trim().is_empty() {
-            warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
-            String::new()
-        } else {
-            openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await?
-        };
-
-        sm.transition(State::Speaking)?;
-        if response.trim().is_empty() {
-            info!("Keine Antwort von OpenClaw - keine Sprachausgabe");
-            if is_followup_turn {
-                // Kein Folge-Input erkannt - Kanal schließen und akustisch
-                // markieren, dass ab jetzt wieder das Wake-Word nötig ist.
-                if let Err(e) = sound::play_chime(&cfg.sound).await {
-                    warn!(error = %e, "Konnte Kanal-geschlossen-Ton nicht abspielen");
-                }
-            }
-            sm.transition(State::Idle)?;
-            return Ok(());
-        }
-
+    sm.transition(State::Speaking)?;
+    if response.trim().is_empty() {
+        info!("Keine Antwort von OpenClaw - keine Sprachausgabe");
+    } else {
         // Wake-Word-Erkennung läuft nur im Zustand LISTENING_FOR_WAKEWORD und
         // wird hier bewusst nicht gestartet, damit die eigene Ausgabe keine
-        // neue Wake-Word-Erkennung auslöst. Nach dem Vorlesen wird aber
-        // direkt weiter aufgenommen (record_until_silence markiert Start/
-        // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
-        // erneutes Wake-Word möglich ist.
+        // neue Aufnahme auslöst.
         tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await?;
-
-        if cli.dry_run {
-            // Im Dry-Run würde dieselbe --dry-run-file bei erkannter
-            // Sprache/Antwort sonst als Endlosschleife "weiterreden" -
-            // ein Dry-Run-Durchlauf bleibt daher immer einmalig.
-            sm.transition(State::Idle)?;
-            return Ok(());
-        }
-        is_followup_turn = true;
     }
+
+    sm.transition(State::Idle)?;
+    Ok(())
 }
 
 async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {

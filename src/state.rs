@@ -8,12 +8,6 @@ use tracing::info;
 /// IDLE -> LISTENING_FOR_WAKEWORD -> RECORDING -> TRANSCRIBING
 ///      -> SENDING_TO_OPENCLAW -> SPEAKING -> IDLE
 ///
-/// Nach einer vorgelesenen Antwort kann SPEAKING statt nach IDLE auch
-/// direkt zurück nach RECORDING springen: Der Kanal bleibt für eine
-/// Folgeeingabe offen, ohne dass das Wake-Word erneut nötig ist. Bricht
-/// diese Folgeaufnahme ohne erkannte Sprache ab, geht es von dort wie
-/// gewohnt nach IDLE - das Wake-Word wird dann wieder benötigt.
-///
 /// Jeder Zustand außer IDLE selbst kann bei Fehlern/Timeouts direkt nach
 /// IDLE zurückspringen (Recovery-Pfad), damit der Dienst nach einem
 /// fehlgeschlagenen Schritt nicht hängen bleibt.
@@ -50,8 +44,7 @@ impl State {
             Recording => &[Transcribing, Idle],
             Transcribing => &[SendingToOpenClaw, Idle],
             SendingToOpenClaw => &[Speaking, Idle],
-            // Recording: Folgeeingabe ohne erneutes Wake-Word.
-            Speaking => &[Idle, Recording],
+            Speaking => &[Idle],
         }
     }
 }
@@ -155,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn speaking_can_go_to_idle_or_recording_but_nothing_else() {
+    fn speaking_can_only_go_to_idle() {
         let mut sm = StateMachine::new();
         for s in [
             ListeningForWakeword,
@@ -166,32 +159,7 @@ mod tests {
         ] {
             sm.transition(s).unwrap();
         }
-        assert!(sm.transition(Transcribing).is_err());
-        assert!(sm.transition(SendingToOpenClaw).is_err());
-        assert_eq!(sm.current(), Speaking);
-
-        assert!(sm.transition(Recording).is_ok());
-        assert_eq!(sm.current(), Recording);
-    }
-
-    #[test]
-    fn multi_turn_conversation_can_loop_back_to_recording_before_idle() {
-        let mut sm = StateMachine::new();
-        for s in [
-            ListeningForWakeword,
-            Recording,
-            Transcribing,
-            SendingToOpenClaw,
-            Speaking,
-            // Folgeeingabe ohne erneutes Wake-Word:
-            Recording,
-            Transcribing,
-            SendingToOpenClaw,
-            Speaking,
-            Idle,
-        ] {
-            sm.transition(s).unwrap();
-            assert_eq!(sm.current(), s);
-        }
+        assert!(sm.transition(Recording).is_err());
+        assert!(sm.transition(Idle).is_ok());
     }
 }
