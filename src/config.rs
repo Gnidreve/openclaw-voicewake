@@ -121,6 +121,27 @@ impl Default for TtsConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+pub struct SoundConfig {
+    /// Bestätigungstöne bei Aufnahme-Start/-Ende an/aus.
+    pub enabled: bool,
+    /// Abzuspielende Sound-Datei (Standard: macOS-Systemsound "Glass").
+    pub chime_path: PathBuf,
+    pub player_binary: String,
+    pub timeout_secs: u64,
+}
+impl Default for SoundConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            chime_path: PathBuf::from("/System/Library/Sounds/Glass.aiff"),
+            player_binary: "afplay".to_string(),
+            timeout_secs: 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct GeneralConfig {
     pub ffmpeg_binary: String,
     pub temp_dir: Option<PathBuf>,
@@ -145,6 +166,7 @@ pub struct Config {
     pub whisper: WhisperConfig,
     pub openclaw: OpenClawConfig,
     pub tts: TtsConfig,
+    pub sound: SoundConfig,
     pub general: GeneralConfig,
 }
 
@@ -223,6 +245,17 @@ mod tests {
             .model_path
             .to_string_lossy()
             .ends_with("ggml-large-v3-turbo.bin"));
+    }
+
+    #[test]
+    fn sound_defaults_use_glass_chime_and_afplay() {
+        let cfg = Config::default();
+        assert!(cfg.sound.enabled);
+        assert_eq!(
+            cfg.sound.chime_path,
+            PathBuf::from("/System/Library/Sounds/Glass.aiff")
+        );
+        assert_eq!(cfg.sound.player_binary, "afplay");
     }
 
     #[test]

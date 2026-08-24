@@ -137,6 +137,17 @@ selbstständig OpenClaw-Konfiguration und startet nie ein Gateway neu.
 Aufruf mit `--output_file <wav>` sowie entweder `--model <model_path>`
 (falls gesetzt) oder `--voice <voice>`. Text wird über stdin übergeben.
 
+## Bestätigungstöne
+
+Beim Start der Aufnahme (direkt nachdem das Wake-Word erkannt wurde) und
+beim Ende der Aufnahme (Stille-Timeout oder `max_recording_seconds`) wird
+über `sound.player_binary` (Standard `afplay`) ein kurzer Ton abgespielt -
+standardmäßig der macOS-Systemsound "Glass"
+(`/System/Library/Sounds/Glass.aiff`), konfigurierbar über
+`sound.chime_path`. Mit `sound.enabled = false` lässt sich das abschalten.
+Ein fehlgeschlagener Bestätigungston (z. B. `afplay` nicht gefunden) wird
+nur geloggt und bricht den laufenden Zyklus nicht ab.
+
 ## Performance-Hinweise
 
 Der Audio-Callback (CoreAudio-Echtzeit-Thread) verwendet bewusst

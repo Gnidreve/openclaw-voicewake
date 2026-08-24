@@ -1,6 +1,7 @@
 mod audio;
 mod config;
 mod openclaw;
+mod sound;
 mod state;
 mod transcribe;
 mod tts;
@@ -181,6 +182,10 @@ async fn run_cycle_inner(
 
 async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {
     let mut capture = audio::start_capture(cfg.audio.device.as_deref())?;
+    if let Err(e) = sound::play_chime(&cfg.sound).await {
+        warn!(error = %e, "Konnte Aufnahme-Start-Ton nicht abspielen");
+    }
+
     let mut tracker = vad::SilenceTracker::new(&cfg.vad);
 
     let frame_samples = (((capture.sample_rate as u64 * cfg.vad.frame_ms) / 1000) as usize
@@ -197,18 +202,7 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {
     let mut samples: Vec<f32> = Vec::with_capacity(expected_max_samples);
     let mut frame_buf: Vec<f32> = Vec::with_capacity(frame_samples * 2);
 
-    let finish = |samples: &[f32], capture: &audio::AudioCapture| -> Result<()> {
-        let dropped = capture.dropped_chunks.load(Ordering::Relaxed);
-        if dropped > 0 {
-            warn!(
-                dropped_chunks = dropped,
-                "Audio-Chunks wegen Backpressure verworfen - Aufnahme könnte kleine Lücken enthalten"
-            );
-        }
-        audio::write_wav(out_path, samples, capture.sample_rate, capture.channels)
-    };
-
-    loop {
+    'outer: loop {
         let chunk = match capture.receiver.recv().await {
             Some(c) => c,
             None => {
@@ -229,17 +223,30 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {
                 vad::VadDecision::Continue => {}
                 vad::VadDecision::StopSilence => {
                     info!("Stille erkannt - beende Aufnahme");
-                    return finish(&samples, &capture);
+                    break 'outer;
                 }
                 vad::VadDecision::StopMaxDuration => {
                     info!("Maximale Aufnahmedauer erreicht - beende Aufnahme");
-                    return finish(&samples, &capture);
+                    break 'outer;
                 }
             }
         }
     }
 
-    finish(&samples, &capture)
+    let dropped = capture.dropped_chunks.load(Ordering::Relaxed);
+    if dropped > 0 {
+        warn!(
+            dropped_chunks = dropped,
+            "Audio-Chunks wegen Backpressure verworfen - Aufnahme könnte kleine Lücken enthalten"
+        );
+    }
+    audio::write_wav(out_path, &samples, capture.sample_rate, capture.channels)?;
+
+    if let Err(e) = sound::play_chime(&cfg.sound).await {
+        warn!(error = %e, "Konnte Aufnahme-Ende-Ton nicht abspielen");
+    }
+
+    Ok(())
 }
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {

@@ -58,6 +58,13 @@ extra_args = []
 player_binary = "afplay"
 timeout_secs = 30
 
+[sound]
+# Bestätigungston bei Aufnahme-Start und -Ende (macOS-Systemsound "Glass").
+enabled = true
+chime_path = "/System/Library/Sounds/Glass.aiff"
+player_binary = "afplay"
+timeout_secs = 5
+
 [general]
 ffmpeg_binary = "ffmpeg"
 # temp_dir = "/tmp"
