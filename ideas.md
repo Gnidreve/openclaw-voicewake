@@ -60,15 +60,18 @@ Ausgangspunkt für künftige Iterationen.
     Audiodatei mehr im temporären Verzeichnis; bei einem fehlgeschlagenen
     Zyklus räumt weiterhin die bestehende Zyklusende-Bereinigung des
     gesamten temporären Verzeichnisses auf.
-12. Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen - die
-    Erkennungsmethode ist noch offen und muss entschieden werden:
-    - **Aktuell**: leeres Whisper-Transkript nach der vollen
-      Transkription (Erkennung erst hinterher, aber kein zusätzlicher
-      Aufwand vorab).
-    - **Alternative**: Audio schon vorab auf Bytes-/Energie-Ebene auf
-      Stille prüfen, bevor sie überhaupt an whisper-cli geht (spart die
-      Transkription bei erkennbar leerer Aufnahme, aber zusätzliche
-      Prüflogik nötig).
+12. ~~Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen.~~
+    **Umgesetzt (Variante "vorab prüfen"):** Reproduzierter Bug aus dem
+    Feldtest - Whisper halluziniert bei reiner Stille/Hintergrundrauschen
+    teils nicht-leeren Text, wodurch das bisherige
+    "leeres-Transkript-danach"-Kriterium nicht griff und die
+    Folgerunden-Schleife sich an sich selbst hochschaukelte. Die VAD
+    (`SilenceTracker`) weiß bereits während der Aufnahme, ob jemals
+    echte Sprache (`speech_started`) erkannt wurde; wurde nie Sprache
+    erkannt, werden ffmpeg-Normalisierung und whisper-cli jetzt komplett
+    übersprungen, statt Whisper aus Stille etwas heraushalluzinieren zu
+    lassen. Hängt weiterhin an Punkt 14 (Hintergrundgeräusch über dem
+    RMS-Schwellwert würde `speech_started` fälschlich auslösen).
 13. Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
     unterscheidbaren Sound - damit man akustisch sofort erkennt, ob ein
     Zyklus normal beendet wurde oder ein Fehler aufgetreten ist, statt nur
