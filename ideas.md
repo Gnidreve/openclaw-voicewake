@@ -65,6 +65,19 @@ Ausgangspunkt für künftige Iterationen.
       Stille prüfen, bevor sie überhaupt an whisper-cli geht (spart die
       Transkription bei erkennbar leerer Aufnahme, aber zusätzliche
       Prüflogik nötig).
+13. Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
+    unterscheidbaren Sound - damit man akustisch sofort erkennt, ob ein
+    Zyklus normal beendet wurde oder ein Fehler aufgetreten ist, statt nur
+    stumm zurück nach `IDLE` zu gehen bzw. es nur im Log zu sehen.
+14. Bei ganz leichten Hintergrundgeräuschen wird das Schließen des
+    Audio-Channels unterbunden: Liegt die Umgebungslautstärke dauerhaft
+    knapp über `silence_rms_threshold`, erkennt die VAD nie "Stille" und
+    der Silence-Timeout greift nicht - die Aufnahme läuft bis zum viel
+    späteren `max_recording_seconds`-Limit weiter, statt nach der
+    erwarteten kurzen Stille zu enden. Muss noch überlegt werden, wie sich
+    das minimieren lässt (z. B. adaptiver/dynamischer Schwellwert statt
+    fixem `silence_rms_threshold`, oder Rauschprofil zu Beginn der
+    Aufnahme kalibrieren).
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
