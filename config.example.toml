@@ -65,6 +65,12 @@ chime_path = "/System/Library/Sounds/Glass.aiff"
 player_binary = "afplay"
 timeout_secs = 5
 
+[transcription_log]
+# Chat-artiges Diagnose-Log ("[Input] ..." / "[Output] ...") zusätzlich zu
+# den strukturierten Logs, siehe README.
+enabled = true
+path = "transcription.log"
+
 [general]
 ffmpeg_binary = "ffmpeg"
 # temp_dir = "/tmp"

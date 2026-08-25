@@ -4,6 +4,7 @@ mod openclaw;
 mod sound;
 mod state;
 mod transcribe;
+mod transcript_log;
 mod tts;
 mod vad;
 mod wakeword;
@@ -200,18 +201,34 @@ async fn run_cycle_inner(
         .await?;
         let transcript = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
         info!(%transcript, "Transkription abgeschlossen");
+        transcript_log::log_input(&cfg.transcription_log, &transcript).await;
 
         sm.transition(State::SendingToOpenClaw)?;
         let response = if transcript.trim().is_empty() {
             warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
             String::new()
         } else {
-            openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await?
+            match openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await {
+                Ok(r) => r,
+                Err(e) => {
+                    transcript_log::log_output(
+                        &cfg.transcription_log,
+                        transcript_log::OutputOutcome::Error,
+                    )
+                    .await;
+                    return Err(e);
+                }
+            }
         };
 
         sm.transition(State::Speaking)?;
         if response.trim().is_empty() {
             info!("Keine Antwort von OpenClaw - keine Sprachausgabe");
+            transcript_log::log_output(
+                &cfg.transcription_log,
+                transcript_log::OutputOutcome::Skipped,
+            )
+            .await;
             if is_followup_turn {
                 // Kein Folge-Input erkannt - Kanal schließen und akustisch
                 // markieren, dass ab jetzt wieder das Wake-Word nötig ist.
@@ -229,7 +246,19 @@ async fn run_cycle_inner(
         // direkt weiter aufgenommen (record_until_silence markiert Start/
         // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
         // erneutes Wake-Word möglich ist.
-        tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await?;
+        if let Err(e) = tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await {
+            transcript_log::log_output(
+                &cfg.transcription_log,
+                transcript_log::OutputOutcome::Error,
+            )
+            .await;
+            return Err(e);
+        }
+        transcript_log::log_output(
+            &cfg.transcription_log,
+            transcript_log::OutputOutcome::Success(&response),
+        )
+        .await;
 
         if cli.dry_run {
             // Im Dry-Run würde dieselbe --dry-run-file bei erkannter

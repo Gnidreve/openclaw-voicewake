@@ -177,6 +177,37 @@ Beim allerersten Aufnahmedurchgang nach dem Wake-Word passiert das
 bewusst nicht, um keinen zusätzlichen Ton bei jedem stillen/leeren
 Durchgang zu erzeugen.
 
+## Transcription-Log
+
+Zusätzlich zu den strukturierten `tracing`-Logs schreibt `claw-voice-bridge`
+ein einfaches, chat-artiges Log nach `transcription_log.path` (Standard:
+`transcription.log` im Arbeitsverzeichnis, Append-Modus). Pro Runde gibt es
+genau eine `[Input]`- und eine `[Output]`-Zeile:
+
+```
+[Input] "Hallo"
+[Output] "Auch Hallo"
+[Input] skipped
+[Output] skipped
+[Input] "Wie spät ist es?"
+[Output] error
+```
+
+Text in Anführungszeichen ist immer ein **erfolgreich** übermitteltes
+Transkript bzw. eine erfolgreich vorgelesene Antwort. Alles ohne
+Anführungszeichen ist eine Statusmeldung für einen nicht erfolgreichen
+Schritt:
+
+- `[Input] skipped` - leeres Transkript, OpenClaw wurde nicht aufgerufen.
+- `[Output] skipped` - OpenClaw hat (bei nicht-leerem Transkript) keine
+  Antwort geliefert, es wurde nichts vorgelesen.
+- `[Output] error` - der OpenClaw-Aufruf oder die Piper-Wiedergabe ist
+  fehlgeschlagen (der Zyklus bricht in diesem Fall danach regulär ab).
+
+Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
+fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur
+geloggt und bricht den laufenden Zyklus nicht ab.
+
 ## Performance-Hinweise
 
 Der Audio-Callback (CoreAudio-Echtzeit-Thread) verwendet bewusst
