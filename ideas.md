@@ -50,12 +50,44 @@ Ausgangspunkt für künftige Iterationen.
    Fertigmeldungen gesprochen werden und nichts parallel läuft.
 10. Erst danach als dauerhaften macOS-Hintergrunddienst bzw. echtes
     OpenClaw-Plugin paketieren.
-11. Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
-    pauschal am Ende des gesamten Zyklus. Aufnahme-, Normalisierungs- und
-    TTS-Zwischendateien direkt nach Gebrauch löschen, statt sie im
-    temporären Verzeichnis bis zum Zyklusende liegen zu lassen. Besonders
-    relevant bei mehreren Runden in einer offenen Konversation, damit sich
-    dort nicht unnötig Dateien ansammeln.
+11. ~~Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
+    pauschal am Ende des gesamten Zyklus.~~ **Umgesetzt:** Rohaufnahme wird
+    direkt nach der ffmpeg-Normalisierung gelöscht, die normalisierte
+    Aufnahme direkt nach der Transkription (jeweils vor dem OpenClaw-
+    Aufruf, unabhängig von dessen Ausgang) - Whisper- und Piper-
+    Zwischendateien waren schon vorher direkt nach Gebrauch gelöscht
+    worden. Nach einem erfolgreichen Durchlauf liegt damit keine
+    Audiodatei mehr im temporären Verzeichnis; bei einem fehlgeschlagenen
+    Zyklus räumt weiterhin die bestehende Zyklusende-Bereinigung des
+    gesamten temporären Verzeichnisses auf.
+12. Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen - die
+    Erkennungsmethode ist noch offen und muss entschieden werden:
+    - **Aktuell**: leeres Whisper-Transkript nach der vollen
+      Transkription (Erkennung erst hinterher, aber kein zusätzlicher
+      Aufwand vorab).
+    - **Alternative**: Audio schon vorab auf Bytes-/Energie-Ebene auf
+      Stille prüfen, bevor sie überhaupt an whisper-cli geht (spart die
+      Transkription bei erkennbar leerer Aufnahme, aber zusätzliche
+      Prüflogik nötig).
+13. Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
+    unterscheidbaren Sound - damit man akustisch sofort erkennt, ob ein
+    Zyklus normal beendet wurde oder ein Fehler aufgetreten ist, statt nur
+    stumm zurück nach `IDLE` zu gehen bzw. es nur im Log zu sehen.
+14. Bei ganz leichten Hintergrundgeräuschen wird das Schließen des
+    Audio-Channels unterbunden: Liegt die Umgebungslautstärke dauerhaft
+    knapp über `silence_rms_threshold`, erkennt die VAD nie "Stille" und
+    der Silence-Timeout greift nicht - die Aufnahme läuft bis zum viel
+    späteren `max_recording_seconds`-Limit weiter, statt nach der
+    erwarteten kurzen Stille zu enden. Muss noch überlegt werden, wie sich
+    das minimieren lässt (z. B. adaptiver/dynamischer Schwellwert statt
+    fixem `silence_rms_threshold`, oder Rauschprofil zu Beginn der
+    Aufnahme kalibrieren).
+15. Wie und wann eine neue OpenClaw-Session gestartet wird, damit eine
+    Session nicht unendlich weiterläuft (Kontext wächst sonst
+    unbegrenzt). Grobe Idee, noch nicht final: Ist die letzte Nachricht
+    länger als eine Stunde her, wird vor dem nächsten Aufruf erst ein
+    Session-Reset (z. B. `/new` o. Ä. - genaue Umsetzung offen) gesendet.
+    Schwelle und Mechanismus müssen noch entschieden werden.
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und

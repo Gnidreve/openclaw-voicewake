@@ -145,6 +145,23 @@ impl Default for SoundConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+pub struct TranscriptionLogConfig {
+    /// Chat-artiges Log ("[Input] ..." / "[Output] ...") an/aus.
+    pub enabled: bool,
+    /// Wird bei jeder Zeile im Append-Modus geöffnet.
+    pub path: PathBuf,
+}
+impl Default for TranscriptionLogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: PathBuf::from("transcription.log"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct GeneralConfig {
     pub ffmpeg_binary: String,
     pub temp_dir: Option<PathBuf>,
@@ -170,6 +187,7 @@ pub struct Config {
     pub openclaw: OpenClawConfig,
     pub tts: TtsConfig,
     pub sound: SoundConfig,
+    pub transcription_log: TranscriptionLogConfig,
     pub general: GeneralConfig,
 }
 
@@ -259,6 +277,16 @@ mod tests {
             PathBuf::from("/System/Library/Sounds/Glass.aiff")
         );
         assert_eq!(cfg.sound.player_binary, "afplay");
+    }
+
+    #[test]
+    fn transcription_log_defaults_enabled_with_relative_path() {
+        let cfg = Config::default();
+        assert!(cfg.transcription_log.enabled);
+        assert_eq!(
+            cfg.transcription_log.path,
+            PathBuf::from("transcription.log")
+        );
     }
 
     #[test]
