@@ -224,9 +224,15 @@ Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
 
 ## Sicherheit & Robustheit
 
-- Keine Audio- oder Transkriptdateien werden dauerhaft gespeichert: jeder
-  Zyklus arbeitet in einem eigenen temporären Verzeichnis, das am Ende des
-  Zyklus (auch bei Fehlern) gelöscht wird.
+- Keine Audiodateien werden dauerhaft gespeichert: Roh- und normalisierte
+  Aufnahme werden direkt nach ihrer Verwendung gelöscht (nicht erst am
+  Zyklusende), Whisper- und Piper-Zwischendateien direkt nach Gebrauch.
+  Jeder Zyklus arbeitet zusätzlich in einem eigenen temporären
+  Verzeichnis, das am Ende des Zyklus (auch bei Fehlern) als
+  Sicherheitsnetz komplett gelöscht wird.
+- Ausnahme: das [Transcription-Log](#transcription-log) speichert
+  Transkript- und Antworttext bewusst dauerhaft (Append-Modus) als
+  Diagnose-Hilfe - mit `transcription_log.enabled = false` abschaltbar.
 - Keine API-Keys im Quellcode - alle externen Aufrufe laufen über lokale
   CLI-Kommandos, die du selbst konfigurierst.
 - Timeouts für Aufnahme (`max_recording_seconds`), Whisper, OpenClaw und
