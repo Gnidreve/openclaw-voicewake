@@ -50,6 +50,12 @@ Ausgangspunkt für künftige Iterationen.
    Fertigmeldungen gesprochen werden und nichts parallel läuft.
 10. Erst danach als dauerhaften macOS-Hintergrunddienst bzw. echtes
     OpenClaw-Plugin paketieren.
+11. Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
+    pauschal am Ende des gesamten Zyklus. Aufnahme-, Normalisierungs- und
+    TTS-Zwischendateien direkt nach Gebrauch löschen, statt sie im
+    temporären Verzeichnis bis zum Zyklusende liegen zu lassen. Besonders
+    relevant bei mehreren Runden in einer offenen Konversation, damit sich
+    dort nicht unnötig Dateien ansammeln.
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
@@ -117,3 +123,18 @@ reiner Adapter-Workaround.
 Ein kleiner **read-only Streaming-Prototyp** im Adapter, der die
 WebSocket-Events zunächst nur protokolliert (`chat`, `session.message`,
 `session.operation`, `session.tool`) - bevor Audio/Piper daran gehängt wird.
+
+## Paketierung: Hintergrunddienst mit Menüleisten-Icon (wie Tailscale)
+
+Ergänzung zu Punkt 10 oben ("als dauerhaften macOS-Hintergrunddienst
+paketieren") - konkrete Anforderungen an das spätere Packaging:
+
+- Muss ein **vollständiger Hintergrundtask** sein: läuft ohne offenes
+  Fenster, kein Dock-Icon/Vordergrund-App-Zwang.
+- Ein Fenster (Status/Konfiguration) soll sich bei Bedarf öffnen lassen -
+  **Schließen des Fensters darf den Task aber nicht beenden**. Fenster
+  und Hintergrunddienst sind entkoppelt.
+- Lebt dauerhaft als **Menüleisten-Icon** (macOS-Pendant zur rechten
+  Windows-Taskleiste), vergleichbar mit der Tailscale-Menüleisten-App.
+- Über das Menüleisten-Icon: **An/Aus-Toggle** zum kompletten
+  Aktivieren/Deaktivieren des Dienstes.
