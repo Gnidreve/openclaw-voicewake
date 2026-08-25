@@ -177,7 +177,7 @@ async fn run_cycle_inner(
 
         sm.transition(State::Recording)?;
         let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
-        if cli.dry_run {
+        let speech_detected = if cli.dry_run {
             let source = cli
                 .dry_run_file
                 .clone()
@@ -186,34 +186,50 @@ async fn run_cycle_inner(
                 format!("Kann Beispieldatei nicht kopieren: {}", source.display())
             })?;
             info!(file = %source.display(), "[dry-run] verwende Beispieldatei als Aufnahme");
+            // Dry-Run testet bewusst den vollen Pfad inkl. Whisper, auch wenn
+            // die Beispieldatei nur Stille enthält.
+            true
         } else {
-            record_until_silence(cfg, &raw_wav).await?;
-        }
+            record_until_silence(cfg, &raw_wav).await?
+        };
 
         sm.transition(State::Transcribing)?;
-        let normalized_wav = tmp_dir.join("normalized.wav");
-        transcribe::normalize_audio(
-            &cfg.general,
-            &raw_wav,
-            &normalized_wav,
-            cfg.whisper.timeout_secs,
-        )
-        .await?;
-        // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
-        // unabhängig davon, was mit der Transkription/Antwort danach passiert.
-        if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
-            warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
-        }
+        let transcript = if speech_detected {
+            let normalized_wav = tmp_dir.join("normalized.wav");
+            transcribe::normalize_audio(
+                &cfg.general,
+                &raw_wav,
+                &normalized_wav,
+                cfg.whisper.timeout_secs,
+            )
+            .await?;
+            // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
+            // unabhängig davon, was mit der Transkription/Antwort danach passiert.
+            if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
+                warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
+            }
 
-        let transcript = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
+            let t = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
+
+            // Normalisierte Aufnahme wird nach der Transkription nicht mehr
+            // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
+            if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
+                warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
+            }
+            t
+        } else {
+            // VAD hat während der gesamten Aufnahme keine Sprache erkannt
+            // (nur Stille/Hintergrundrauschen) - Whisper wird erst gar nicht
+            // aufgerufen, damit es aus nicht vorhandener Sprache nichts
+            // heraushalluzinieren kann.
+            info!("Keine Sprache erkannt - überspringe Normalisierung und Transkription");
+            if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
+                warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
+            }
+            String::new()
+        };
         info!(%transcript, "Transkription abgeschlossen");
         transcript_log::log_input(&cfg.transcription_log, &transcript).await;
-
-        // Normalisierte Aufnahme wird nach der Transkription nicht mehr
-        // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
-        if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
-            warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
-        }
 
         sm.transition(State::SendingToOpenClaw)?;
         let response = if transcript.trim().is_empty() {
@@ -283,7 +299,11 @@ async fn run_cycle_inner(
     }
 }
 
-async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {
+/// Nimmt bis Stille/Timeout auf und schreibt das Ergebnis nach `out_path`.
+/// Gibt zurück, ob die VAD während der Aufnahme jemals echte Sprache
+/// erkannt hat (siehe `SilenceTracker::speech_started`) - `false` bedeutet
+/// reine Stille/Hintergrundrauschen, unabhängig vom rohen Audioinhalt.
+async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
     let mut capture = audio::start_capture(cfg.audio.device.as_deref())?;
     if let Err(e) = sound::play_chime(&cfg.sound).await {
         warn!(error = %e, "Konnte Aufnahme-Start-Ton nicht abspielen");
@@ -349,7 +369,7 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<()> {
         warn!(error = %e, "Konnte Aufnahme-Ende-Ton nicht abspielen");
     }
 
-    Ok(())
+    Ok(tracker.speech_started())
 }
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {
