@@ -78,6 +78,12 @@ Ausgangspunkt für künftige Iterationen.
     das minimieren lässt (z. B. adaptiver/dynamischer Schwellwert statt
     fixem `silence_rms_threshold`, oder Rauschprofil zu Beginn der
     Aufnahme kalibrieren).
+15. Wie und wann eine neue OpenClaw-Session gestartet wird, damit eine
+    Session nicht unendlich weiterläuft (Kontext wächst sonst
+    unbegrenzt). Grobe Idee, noch nicht final: Ist die letzte Nachricht
+    länger als eine Stunde her, wird vor dem nächsten Aufruf erst ein
+    Session-Reset (z. B. `/new` o. Ä. - genaue Umsetzung offen) gesendet.
+    Schwelle und Mechanismus müssen noch entschieden werden.
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
