@@ -1,7 +1,13 @@
 name: Build macOS Binary
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -40,3 +46,14 @@ jobs:
           name: claw-voice-bridge-macos
           path: claw-voice-bridge-macos.zip
           retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            claw-voice-bridge-macos.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
