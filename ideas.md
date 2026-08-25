@@ -50,12 +50,16 @@ Ausgangspunkt für künftige Iterationen.
    Fertigmeldungen gesprochen werden und nichts parallel läuft.
 10. Erst danach als dauerhaften macOS-Hintergrunddienst bzw. echtes
     OpenClaw-Plugin paketieren.
-11. Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
-    pauschal am Ende des gesamten Zyklus. Aufnahme-, Normalisierungs- und
-    TTS-Zwischendateien direkt nach Gebrauch löschen, statt sie im
-    temporären Verzeichnis bis zum Zyklusende liegen zu lassen. Besonders
-    relevant bei mehreren Runden in einer offenen Konversation, damit sich
-    dort nicht unnötig Dateien ansammeln.
+11. ~~Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
+    pauschal am Ende des gesamten Zyklus.~~ **Umgesetzt:** Rohaufnahme wird
+    direkt nach der ffmpeg-Normalisierung gelöscht, die normalisierte
+    Aufnahme direkt nach der Transkription (jeweils vor dem OpenClaw-
+    Aufruf, unabhängig von dessen Ausgang) - Whisper- und Piper-
+    Zwischendateien waren schon vorher direkt nach Gebrauch gelöscht
+    worden. Nach einem erfolgreichen Durchlauf liegt damit keine
+    Audiodatei mehr im temporären Verzeichnis; bei einem fehlgeschlagenen
+    Zyklus räumt weiterhin die bestehende Zyklusende-Bereinigung des
+    gesamten temporären Verzeichnisses auf.
 12. Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen - die
     Erkennungsmethode ist noch offen und muss entschieden werden:
     - **Aktuell**: leeres Whisper-Transkript nach der vollen

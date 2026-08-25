@@ -199,9 +199,21 @@ async fn run_cycle_inner(
             cfg.whisper.timeout_secs,
         )
         .await?;
+        // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
+        // unabhängig davon, was mit der Transkription/Antwort danach passiert.
+        if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
+            warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
+        }
+
         let transcript = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
         info!(%transcript, "Transkription abgeschlossen");
         transcript_log::log_input(&cfg.transcription_log, &transcript).await;
+
+        // Normalisierte Aufnahme wird nach der Transkription nicht mehr
+        // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
+        if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
+            warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
+        }
 
         sm.transition(State::SendingToOpenClaw)?;
         let response = if transcript.trim().is_empty() {
