@@ -56,6 +56,15 @@ Ausgangspunkt für künftige Iterationen.
     temporären Verzeichnis bis zum Zyklusende liegen zu lassen. Besonders
     relevant bei mehreren Runden in einer offenen Konversation, damit sich
     dort nicht unnötig Dateien ansammeln.
+12. Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen - die
+    Erkennungsmethode ist noch offen und muss entschieden werden:
+    - **Aktuell**: leeres Whisper-Transkript nach der vollen
+      Transkription (Erkennung erst hinterher, aber kein zusätzlicher
+      Aufwand vorab).
+    - **Alternative**: Audio schon vorab auf Bytes-/Energie-Ebene auf
+      Stille prüfen, bevor sie überhaupt an whisper-cli geht (spart die
+      Transkription bei erkennbar leerer Aufnahme, aber zusätzliche
+      Prüflogik nötig).
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
