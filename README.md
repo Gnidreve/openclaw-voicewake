@@ -26,13 +26,14 @@ keine Wake-Word-Erkennung (sie wird nur im Zustand
 also nicht selbst erneut triggern.
 
 Nach einer vorgelesenen Antwort bleibt der Kanal offen: `SPEAKING` springt
-direkt zurück nach `RECORDING` (mit Start-/Ende-Ton wie gewohnt, siehe
+direkt zurück nach `RECORDING` und spielt dabei den Start-Ton (siehe
 [Bestätigungstöne](#bestätigungstöne)), sodass eine Folgeeingabe ohne
 erneutes Wake-Word möglich ist - dieselbe VAD-/Timeout-Logik wie beim
 ersten Aufnahmedurchgang gilt auch hier. Bleibt diese Folgeaufnahme ohne
 erkannte Sprache (leeres Transkript) oder liefert OpenClaw keine Antwort,
-wird der Kanal mit einem zusätzlichen Ton als geschlossen markiert und der
-Dienst geht nach `IDLE` zurück - ab dann ist wieder das Wake-Word nötig.
+geht der Dienst nach `IDLE` zurück - ab dann ist wieder das Wake-Word
+nötig. Dass der Kanal zu ist, hört man daran, dass kein neuer Start-Ton
+mehr kommt.
 
 Der offene Kanal ist zusätzlich hart begrenzt: nach
 `conversation.max_followup_turns` Folgerunden (Standard: 3) wird er auch
@@ -85,7 +86,7 @@ cargo build --release
 Die Binary liegt danach unter `target/release/claw-voice-bridge`.
 
 > **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
-> und `cargo test` (58/58 Tests grün) wurden auf Linux verifiziert. Das
+> und `cargo test` (64/64 Tests grün) wurden auf Linux verifiziert. Das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
@@ -203,23 +204,65 @@ Aufruf mit `--output_file <wav>` sowie entweder `--model <model_path>`
 
 ## Bestätigungstöne
 
-Beim Start der Aufnahme (direkt nachdem das Wake-Word erkannt wurde) und
-beim Ende der Aufnahme (Stille-Timeout oder `max_recording_seconds`) wird
-über `sound.player_binary` (Standard `afplay`) ein kurzer Ton abgespielt -
-standardmäßig der macOS-Systemsound "Glass"
-(`/System/Library/Sounds/Glass.aiff`), konfigurierbar über
-`sound.chime_path`. Mit `sound.enabled = false` lässt sich das abschalten.
-Ein fehlgeschlagener Bestätigungston (z. B. `afplay` nicht gefunden) wird
-nur geloggt und bricht den laufenden Zyklus nicht ab.
+Es gibt genau zwei Töne, und beide bedeuten etwas Bestimmtes. Der
+Bestätigungston ist standardmäßig der macOS-Systemsound "Glass"
+(`/System/Library/Sounds/Glass.aiff`, konfigurierbar über
+`sound.chime_path`), der Fehlerton "Basso" (siehe [Fehlerton](#fehlerton)).
+Mit `sound.enabled = false` lässt sich beides abschalten. Ein
+fehlgeschlagener Ton (z. B. `afplay` nicht gefunden) wird nur geloggt und
+bricht den laufenden Zyklus nicht ab.
 
-Zusätzlich gibt es einen dritten Fall: Endet eine **Folgeaufnahme** (siehe
-[Zustandsmaschine](#zustandsmaschine)) ohne erkannte Sprache oder ohne
-Antwort von OpenClaw, wird derselbe Ton noch einmal abgespielt, um das
-Schließen des Kanals zu markieren - danach ist wieder das Wake-Word nötig.
-Dasselbe passiert, wenn `conversation.max_followup_turns` erreicht ist.
-Beim allerersten Aufnahmedurchgang nach dem Wake-Word passiert das
-bewusst nicht, um keinen zusätzlichen Ton bei jedem stillen/leeren
-Durchgang zu erzeugen.
+| Signal | Bedeutung |
+|---|---|
+| Glass beim Start | Das Mikrofon ist offen, sprich jetzt |
+| Glass am Ende | Sprache erkannt - die Aufnahme wird an OpenClaw geschickt |
+| **kein** Glass am Ende | Nichts erkannt, es wird **nichts** geschickt |
+| **kein** Glass nach einer Antwort | Der Kanal ist zu, es ist wieder das Wake-Word nötig |
+| Basso | Der Zyklus ist mit einem Fehler abgebrochen |
+
+Der Ende-Ton hängt also an der Spracherkennung, nicht am bloßen Ende der
+Aufnahme: Er bestätigt das **Absenden**. Bleibt er aus, weiß man ohne
+Hinsehen, dass die Runde ins Leere lief.
+
+Einen eigenen "Kanal geschlossen"-Ton gibt es bewusst **nicht** mehr. Er
+klang identisch zum Absende-Ton und war deshalb eher verwirrend als
+hilfreich - und er ist überflüssig: Ob der Kanal nach einer Antwort noch
+offen ist, hört man daran, ob ein neuer Start-Ton kommt oder nicht.
+
+Der Start-Ton läuft **bevor** das Mikrofon geöffnet wird, der Ende-Ton
+erst nachdem es wieder geschlossen ist (siehe
+[Warum der Start-Ton vor dem Mikrofon kommt](#warum-der-start-ton-vor-dem-mikrofon-kommt)).
+
+> **Offen:** Der Fall "abgeschickt, aber OpenClaw liefert keine Antwort"
+> (`[Output] skipped`) ist derzeit tonlos - der Absende-Ton kam, danach
+> passiert hörbar nichts mehr.
+
+### Warum der Start-Ton vor dem Mikrofon kommt
+
+Nicht nur der Sauberkeit halber - die umgekehrte Reihenfolge war die
+Ursache eines Halluzinations-Loops im Feldtest. Bei einem Speakerphone
+(Lautsprecher und Mikrofon im selben Gerät, z. B. Anker PowerConf S330)
+landete der Glass-Ton laut in der eigenen Aufnahme. Gut eine Sekunde über
+dem RMS-Schwellwert reicht, um `min_speech_ms` zu überschreiten: Die
+VAD meldete damit bei **jeder** Aufnahme "Sprache erkannt", auch wenn
+niemand sprach. Der Whisper-Skip für stille Aufnahmen konnte deshalb nie
+greifen, Whisper bekam faktisch Stille zu sehen und halluzinierte daraus
+Text (Untertitel-Abspänne, "Vielen Dank."), der als Eingabe wiederum eine
+Antwort erzeugte und den Kanal offen hielt.
+
+Der Ton läuft daher vor dem Öffnen des Mikrofons, gefolgt von
+`audio.mic_open_delay_ms` (Standard 200 ms) Pause für das Ausklingen von
+Lautsprecher und Raum. Dieselbe Pause schützt in der Folgerunde davor,
+dass das Ende einer gerade vorgelesenen Antwort in die nächste Aufnahme
+blutet. Der Ende-Ton läuft entsprechend erst, nachdem das Mikrofon wieder
+geschlossen ist.
+
+Erst dadurch ist `speech_started` überhaupt aussagekräftig - und damit
+auch der Absende-Ton, der genau daran hängt.
+
+Im `transcription.log` war das Symptom gut sichtbar: Zeilen wie
+`[Input] "* Ding *"` sind der eigene Bestätigungston, den Whisper als
+Nicht-Sprach-Ereignis transkribiert hat.
 
 ### Fehlerton
 
@@ -288,10 +331,16 @@ Apostrophe ignoriert) per Teilstring-Suche - `Untertitelung des ZDF` greift
 also auch bei `Untertitelung des ZDF, 2020`. Eine leere Liste schaltet den
 Filter ab.
 
-Das ist bewusst nur eine Nachbereinigung: Fremdgeräusche kommen damit nicht
-mehr beim Agenten an, die Aufnahme selbst wird aber trotzdem gestartet. Der
-zugrunde liegende Punkt (fixer `vad.silence_rms_threshold` vs. dynamische
-Raumlautstärke) steht als offener Punkt in `ideas.md`.
+Das ist bewusst nur das letzte Netz, nicht die tragende Schicht. Davor
+liegen zwei Stufen, die verhindern sollen, dass Whisper überhaupt Stille zu
+sehen bekommt: der Start-Ton außerhalb der Aufnahme (siehe
+[oben](#warum-der-start-ton-vor-dem-mikrofon-kommt)) und die
+Sprach-Erkennung der VAD, die `min_speech_ms` **zusammenhängend** verlangt
+(`vad.speech_gap_ms`) - ohne beides öffnete sich das Gate bei jeder
+Aufnahme. Was danach noch durchkommt, ist echtes Fremdgeräusch über dem
+RMS-Schwellwert; der zugehörige offene Punkt (fixer
+`vad.silence_rms_threshold` vs. dynamische Raumlautstärke) steht in
+`ideas.md`.
 
 Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
 fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur
@@ -349,6 +398,10 @@ Abgedeckt sind u. a.:
   Recovery nach `IDLE` aus jedem Zwischenzustand.
 - VAD-Timeout-Logik: Fortsetzen bei Sprache, Stopp nach Stille-Timeout,
   Stopp bei `max_recording_seconds`, kein Stopp vor erkannter Sprache.
+- VAD-Sprach-Erkennung: verstreute laute Einzelframes öffnen das Gate
+  **nicht** (Regression aus dem Feldtest), kurze Silbenpausen setzen einen
+  laufenden Sprach-Abschnitt nicht zurück, eine lange Pause schon, und der
+  Stille-Timeout greift auch nach einem zurückgesetzten Abschnitt.
 - CLI-Argument-Konstruktion für `whisper-cli`, `ffmpeg`, den
   OpenClaw-Adapter und `piper` (inkl. `extra_args`, explizitem
   Zielkanal, Modell- vs. Stimmen-Auswahl bei Piper).

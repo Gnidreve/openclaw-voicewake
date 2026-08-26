@@ -3,11 +3,24 @@ use clap::Parser;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
     /// Name des CoreAudio-Eingabegeräts. `None` = Systemstandard.
     pub device: Option<String>,
+    /// Wartezeit zwischen dem Start-Ton und dem Öffnen des Mikrofons.
+    /// Lautsprecher und Raum klingen nach; ohne diese Pause landet das
+    /// Ausklingen des Tons (bzw. das Ende einer gerade vorgelesenen Antwort)
+    /// in der eigenen Aufnahme.
+    pub mic_open_delay_ms: u64,
+}
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            device: None,
+            mic_open_delay_ms: 200,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,6 +54,12 @@ pub struct VadConfig {
     pub max_recording_seconds: u64,
     pub silence_rms_threshold: f32,
     pub min_speech_ms: u64,
+    /// Zusammenhängende Stille, nach der ein laufender Sprach-Abschnitt als
+    /// beendet gilt und `min_speech_ms` wieder von vorn zählt. Verhindert,
+    /// dass sich verstreute laute Frames über die ganze Aufnahme zu
+    /// "Sprache erkannt" aufaddieren; kurze Pausen zwischen Silben bleiben
+    /// dabei unschädlich.
+    pub speech_gap_ms: u64,
     pub frame_ms: u64,
 }
 impl Default for VadConfig {
@@ -50,6 +69,7 @@ impl Default for VadConfig {
             max_recording_seconds: 60,
             silence_rms_threshold: 0.02,
             min_speech_ms: 300,
+            speech_gap_ms: 200,
             frame_ms: 30,
         }
     }

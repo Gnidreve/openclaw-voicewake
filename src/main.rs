@@ -301,11 +301,9 @@ async fn run_cycle_inner(
                 transcript_log::OutputOutcome::Skipped,
             )
             .await;
-            if followup_turns > 0 {
-                // Kein Folge-Input erkannt - Kanal schließen und akustisch
-                // markieren, dass ab jetzt wieder das Wake-Word nötig ist.
-                close_channel_audibly(cfg).await;
-            }
+            // Bewusst ohne eigenen Ton: Wurde nichts erkannt, ist bereits der
+            // Absende-Ton ausgeblieben - ein zusätzlicher, gleich klingender
+            // Ton würde nur verwirren.
             sm.transition(State::Idle)?;
             return Ok(());
         }
@@ -343,19 +341,12 @@ async fn run_cycle_inner(
                 max_followup_turns = cfg.conversation.max_followup_turns,
                 "Maximale Zahl an Folgeeingaben erreicht - schließe den Kanal"
             );
-            close_channel_audibly(cfg).await;
+            // Ebenfalls ohne eigenen Ton: Dass der Kanal zu ist, hört man
+            // daran, dass nach der Antwort kein Start-Ton mehr kommt.
             sm.transition(State::Idle)?;
             return Ok(());
         }
         followup_turns += 1;
-    }
-}
-
-/// Markiert das Schließen des Kanals mit einem Ton: ab hier ist wieder das
-/// Wake-Word nötig. Fehler beim Abspielen sind unkritisch.
-async fn close_channel_audibly(cfg: &Config) {
-    if let Err(e) = sound::play_chime(&cfg.sound).await {
-        warn!(error = %e, "Konnte Kanal-geschlossen-Ton nicht abspielen");
     }
 }
 
@@ -364,10 +355,22 @@ async fn close_channel_audibly(cfg: &Config) {
 /// erkannt hat (siehe `SilenceTracker::speech_started`) - `false` bedeutet
 /// reine Stille/Hintergrundrauschen, unabhängig vom rohen Audioinhalt.
 async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
-    let mut capture = audio::start_capture(cfg.audio.device.as_deref())?;
+    // Ton VOR dem Öffnen des Mikrofons. Bei einem Lautsprecher mit
+    // integriertem Mikrofon (z. B. Anker PowerConf S330) landete er sonst in
+    // der eigenen Aufnahme - laut und lang genug, um `speech_started` bei
+    // *jeder* Aufnahme auszulösen. Damit lief Whisper auch über reine Stille
+    // und halluzinierte daraus Text (Untertitel-Abspänne, "Vielen Dank."),
+    // der als Eingabe den Kanal offen hielt.
     if let Err(e) = sound::play_chime(&cfg.sound).await {
         warn!(error = %e, "Konnte Aufnahme-Start-Ton nicht abspielen");
     }
+    if cfg.audio.mic_open_delay_ms > 0 {
+        // Lautsprecher und Raum klingen nach - das gilt auch für das Ende
+        // einer gerade vorgelesenen Antwort in der Folgerunde.
+        tokio::time::sleep(Duration::from_millis(cfg.audio.mic_open_delay_ms)).await;
+    }
+
+    let mut capture = audio::start_capture(cfg.audio.device.as_deref())?;
 
     let mut tracker = vad::SilenceTracker::new(&cfg.vad);
 
@@ -425,11 +428,25 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
     }
     audio::write_wav(out_path, &samples, capture.sample_rate, capture.channels)?;
 
-    if let Err(e) = sound::play_chime(&cfg.sound).await {
-        warn!(error = %e, "Konnte Aufnahme-Ende-Ton nicht abspielen");
+    // Mikrofon schließen, bevor der Ende-Ton läuft - aus demselben Grund, aus
+    // dem der Start-Ton vor dem Öffnen kommt: das Mikrofon soll nur offen
+    // sein, solange wirklich aufgenommen wird.
+    drop(capture);
+
+    // Der zweite Ton bestätigt das Absenden, nicht bloß das Ende der
+    // Aufnahme. Wurde keine Sprache erkannt, geht auch nichts an OpenClaw -
+    // dann bleibt er aus, und genau dieses Ausbleiben ist das Signal
+    // "nichts verstanden, nichts abgeschickt".
+    let speech_detected = tracker.speech_started();
+    if speech_detected {
+        if let Err(e) = sound::play_chime(&cfg.sound).await {
+            warn!(error = %e, "Konnte Absende-Ton nicht abspielen");
+        }
+    } else {
+        info!("Keine Sprache erkannt - kein Absende-Ton, es wird nichts gesendet");
     }
 
-    Ok(tracker.speech_started())
+    Ok(speech_detected)
 }
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {
