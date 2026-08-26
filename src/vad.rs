@@ -59,6 +59,15 @@ impl SilenceTracker {
 
         VadDecision::Continue
     }
+
+    /// Ob während der Aufnahme jemals RMS-Energie über `silence_rms_threshold`
+    /// für mindestens `min_speech_ms` am Stück lag. `false` bedeutet: die
+    /// gesamte Aufnahme war (aus VAD-Sicht) Stille/Hintergrundrauschen -
+    /// unabhängig davon, was Whisper aus dem Audio heraushalluzinieren würde,
+    /// sollte es trotzdem transkribiert werden.
+    pub fn speech_started(&self) -> bool {
+        self.speech_started
+    }
 }
 
 pub fn rms(samples: &[f32]) -> f32 {
@@ -133,6 +142,25 @@ mod tests {
             }
         }
         assert_eq!(last, VadDecision::StopMaxDuration);
+    }
+
+    #[test]
+    fn speech_started_stays_false_for_pure_silence() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..50 {
+            t.push_frame(0.0, 30);
+        }
+        assert!(!t.speech_started());
+    }
+
+    #[test]
+    fn speech_started_becomes_true_once_min_speech_ms_reached() {
+        let mut t = SilenceTracker::new(&cfg());
+        assert!(!t.speech_started());
+        for _ in 0..15 {
+            t.push_frame(0.1, 30);
+        }
+        assert!(t.speech_started());
     }
 
     #[test]
