@@ -34,6 +34,14 @@ erkannte Sprache (leeres Transkript) oder liefert OpenClaw keine Antwort,
 wird der Kanal mit einem zusätzlichen Ton als geschlossen markiert und der
 Dienst geht nach `IDLE` zurück - ab dann ist wieder das Wake-Word nötig.
 
+Der offene Kanal ist zusätzlich hart begrenzt: nach
+`conversation.max_followup_turns` Folgerunden (Standard: 3) wird er auch
+dann geschlossen, wenn jede Runde eine Antwort erzeugt hat. Ohne diese
+Grenze können Fremdgeräusche im Raum - im Feldtest ein laufender Fernseher -
+den Kanal beliebig lange offen halten, weil jede "Eingabe" wieder eine
+Antwort erzeugt. Mit `max_followup_turns = 0` ist nach jeder Antwort sofort
+wieder das Wake-Word nötig.
+
 ## Voraussetzungen
 
 - macOS auf Apple Silicon
@@ -77,7 +85,7 @@ cargo build --release
 Die Binary liegt danach unter `target/release/claw-voice-bridge`.
 
 > **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
-> und `cargo test` (26/26 Tests grün) wurden auf Linux verifiziert. Das
+> und `cargo test` (58/58 Tests grün) wurden auf Linux verifiziert. Das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
@@ -109,6 +117,39 @@ wird nur ein einzelner Zyklus ausgeführt - hilfreich zum Testen. Ein
 "Zyklus" beginnt dabei immer mit dem Wake-Word, kann aber intern mehrere
 Gesprächsrunden umfassen, solange der Kanal offen bleibt (siehe
 [Zustandsmaschine](#zustandsmaschine)).
+
+### Nur eine Instanz gleichzeitig
+
+Beim Start belegt `claw-voice-bridge` eine `flock`-Sperre auf
+`general.lock_file` (Standard: `<temp_dir>/claw-voice-bridge.lock`). Läuft
+bereits eine Instanz, bricht der zweite Start mit einer Meldung inklusive
+der PID der laufenden Instanz ab, statt still danebenzulaufen.
+
+Der Hintergrund stammt aus dem Feldtest: Zwei parallel laufende Bridges
+starten je einen eigenen Wake-Word-Listener, beide greifen auf dasselbe
+Mikrofon zu und nehmen gleichzeitig auf - im Log sichtbar als doppelte
+Listener-Starts pro Zyklus. Das gilt auch für einen `--dry-run`- oder
+`--once`-Testlauf neben einem laufenden Dienst: die späteren Schritte
+(Piper-Wiedergabe, OpenClaw-Session) würden sich sonst ebenfalls
+überlagern.
+
+Die Sperre wird vom Kernel gehalten und beim Prozessende automatisch
+freigegeben - auch bei `SIGKILL` oder Absturz. Eine übrig gebliebene
+Sperrdatei blockiert deshalb nichts und muss nicht aufgeräumt werden.
+Bewusster Parallelbetrieb (z. B. zwei Instanzen an zwei verschiedenen
+Mikrofonen) lässt sich mit `general.single_instance = false` bzw. einer
+eigenen `general.lock_file` je Instanz einschalten.
+
+### Wake-Word-Schwellwert
+
+Der Erkennungs-Schwellwert gehört in das Wake-Word-Kommando selbst (z. B.
+`--threshold` des openWakeWord-Listeners), nicht in `config.toml`. Als
+Anhaltspunkt aus dem Feldtest mit `hey_jarvis`: **echte** Treffer lagen bei
+Scores von 0.50-0.98, ruhiges Grundrauschen erreichte aber schon ~0.20. Ein
+Schwellwert von 0.1 löste dadurch sofort ohne gesprochenes Wake-Word aus und
+startete eine Aufnahme; 0.5 hat sich als brauchbarer Startwert bewährt. Wer
+nachjustiert, sollte die Scores des Listeners mitloggen und den Schwellwert
+deutlich über dem beobachteten Grundrauschen wählen.
 
 ## Dry-Run (ohne Mikrofon)
 
@@ -173,9 +214,25 @@ Zusätzlich gibt es einen dritten Fall: Endet eine **Folgeaufnahme** (siehe
 [Zustandsmaschine](#zustandsmaschine)) ohne erkannte Sprache oder ohne
 Antwort von OpenClaw, wird derselbe Ton noch einmal abgespielt, um das
 Schließen des Kanals zu markieren - danach ist wieder das Wake-Word nötig.
+Dasselbe passiert, wenn `conversation.max_followup_turns` erreicht ist.
 Beim allerersten Aufnahmedurchgang nach dem Wake-Word passiert das
 bewusst nicht, um keinen zusätzlichen Ton bei jedem stillen/leeren
 Durchgang zu erzeugen.
+
+### Fehlerton
+
+Bricht ein Zyklus **nach** erkanntem Wake-Word mit einem Fehler ab (ffmpeg,
+whisper-cli, OpenClaw-Adapter oder Piper), wird ein deutlich anders
+klingender Ton abgespielt - standardmäßig der macOS-Systemsound "Basso"
+(`sound.error_chime_path`). Damit ist hörbar unterscheidbar, ob ein Zyklus
+normal beendet wurde oder fehlgeschlagen ist, statt dass der Dienst stumm
+nach `IDLE` zurückgeht und der Fehler nur im Log steht.
+
+Fehler **während** der Wake-Word-Erkennung selbst (z. B. Wake-Word-Kommando
+nicht installiert) lösen bewusst keinen Ton aus: dort wartet niemand hörbar
+auf eine Antwort, und der Neustart-Loop würde sonst im Takt von
+`wakeword.restart_delay_ms` dauerhaft Fehlertöne erzeugen. Wie die
+Bestätigungstöne hängt auch der Fehlerton an `sound.enabled`.
 
 ## Transcription-Log
 
@@ -189,6 +246,8 @@ genau eine `[Input]`- und eine `[Output]`-Zeile:
 [Output] "Auch Hallo"
 [Input] skipped
 [Output] skipped
+[Input] ignored: Untertitelung des ZDF, 2020
+[Output] skipped
 [Input] "Wie spät ist es?"
 [Output] error
 ```
@@ -199,10 +258,38 @@ Anführungszeichen ist eine Statusmeldung für einen nicht erfolgreichen
 Schritt:
 
 - `[Input] skipped` - leeres Transkript, OpenClaw wurde nicht aufgerufen.
+- `[Input] ignored: <text>` - das Transkript wurde vom
+  [Transkript-Filter](#transkript-filter) als Störgeräusch/Halluzination
+  verworfen. Der verworfene Text steht bewusst **ohne** Anführungszeichen
+  dahinter, damit nachvollziehbar bleibt, was gefiltert wurde, ohne dass es
+  wie eine übermittelte Eingabe aussieht.
 - `[Output] skipped` - OpenClaw hat (bei nicht-leerem Transkript) keine
   Antwort geliefert, es wurde nichts vorgelesen.
 - `[Output] error` - der OpenClaw-Aufruf oder die Piper-Wiedergabe ist
-  fehlgeschlagen (der Zyklus bricht in diesem Fall danach regulär ab).
+  fehlgeschlagen (der Zyklus bricht in diesem Fall danach regulär ab und
+  spielt den [Fehlerton](#fehlerton) ab).
+
+## Transkript-Filter
+
+Die VAD erkennt Fremdgeräusche mit genug Energie (z. B. TV-Ton) als Sprache,
+und Whisper macht daraus gerne typische Abspann-Halluzinationen wie
+`Untertitelung des ZDF, 2020`. Ohne Gegenmaßnahme geht so etwas als
+vollwertige Eingabe an OpenClaw - und hält, weil es eine Antwort erzeugt,
+den Kanal für weitere Folgeeingaben offen.
+
+`transcript_filter.ignored_patterns` enthält deshalb eine Liste von Mustern
+(Default: die bekanntesten deutschen Whisper-Untertitel-Halluzinationen).
+Enthält ein Transkript eines davon, wird es wie "keine Sprache" behandelt:
+kein OpenClaw-Aufruf, `[Input] ignored: ...` im Transcription-Log, Kanal wird
+geschlossen. Verglichen wird normalisiert (Kleinschreibung, Satzzeichen und
+Apostrophe ignoriert) per Teilstring-Suche - `Untertitelung des ZDF` greift
+also auch bei `Untertitelung des ZDF, 2020`. Eine leere Liste schaltet den
+Filter ab.
+
+Das ist bewusst nur eine Nachbereinigung: Fremdgeräusche kommen damit nicht
+mehr beim Agenten an, die Aufnahme selbst wird aber trotzdem gestartet. Der
+zugrunde liegende Punkt (fixer `vad.silence_rms_threshold` vs. dynamische
+Raumlautstärke) steht als offener Punkt in `ideas.md`.
 
 Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
 fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur
@@ -239,6 +326,12 @@ Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
   Piper (jeweils `timeout_secs`).
 - SIGINT/SIGTERM werden abgefangen; der Dienst beendet den aktuellen Zyklus
   und stoppt danach sauber.
+- Nur eine Instanz gleichzeitig (siehe
+  [Nur eine Instanz gleichzeitig](#nur-eine-instanz-gleichzeitig)), damit sich
+  nicht zwei Prozesse um Mikrofon und Wake-Word-Listener streiten.
+- Der offene Folgeeingabe-Kanal ist auf `conversation.max_followup_turns`
+  Runden begrenzt und filtert bekannte Whisper-Halluzinationen aus
+  Hintergrundton heraus (siehe [Transkript-Filter](#transkript-filter)).
 - Strukturierte Logs (via `tracing`) mit Zeitstempel und jedem
   Zustandswechsel.
 
@@ -258,8 +351,12 @@ Abgedeckt sind u. a.:
   OpenClaw-Adapter und `piper` (inkl. `extra_args`, explizitem
   Zielkanal, Modell- vs. Stimmen-Auswahl bei Piper).
 - Config-Defaults und -Validierung (u. a. Ablehnung eines leeren
-  `openclaw.target_channel`).
+  `openclaw.target_channel`), Ableitung des Sperrdatei-Pfads.
 - CLI-Flag-Parsing (`--dry-run`, `--dry-run-file`, Defaults).
+- Einzelinstanz-Sperre: Belegen, Ablehnen einer zweiten Sperre inkl. PID in
+  der Meldung, erneutes Belegen nach Freigabe.
+- Transkript-Filter: Normalisierung, Treffer auf den Halluzinationen aus dem
+  Feldtest, keine Treffer auf echten Eingaben, leere Muster/Transkripte.
 
 ## Bekannte Einschränkungen / Annahmen
 

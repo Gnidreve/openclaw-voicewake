@@ -229,6 +229,7 @@ dependencies = [
  "clap",
  "cpal",
  "hound",
+ "libc",
  "serde",
  "thiserror",
  "tokio",

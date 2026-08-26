@@ -1,9 +1,11 @@
 mod audio;
 mod config;
+mod instance_lock;
 mod openclaw;
 mod sound;
 mod state;
 mod transcribe;
+mod transcript_filter;
 mod transcript_log;
 mod tts;
 mod vad;
@@ -43,6 +45,18 @@ async fn main() -> Result<()> {
         warn!("Dry-Run ohne --dry-run-file: die Aufnahme kann nicht simuliert werden");
     }
 
+    // Muss vor allem anderen greifen: zwei gleichzeitig laufende Instanzen
+    // starten je einen eigenen Wake-Word-Listener und greifen parallel auf
+    // dasselbe Mikrofon zu. Die Sperre lebt bis zum Ende von `main`.
+    let _instance_lock = if cfg.general.single_instance {
+        Some(instance_lock::InstanceLock::acquire(
+            &cfg.general.lock_path(),
+        )?)
+    } else {
+        warn!("general.single_instance = false - mehrere Instanzen können sich um das Mikrofon streiten");
+        None
+    };
+
     let shutdown = Arc::new(AtomicBool::new(false));
     spawn_signal_handler(shutdown.clone());
 
@@ -58,6 +72,17 @@ async fn main() -> Result<()> {
 
         if let Err(e) = run_cycle(&cfg, &cli, &mut sm, &shutdown).await {
             error!(error = %e, from = %sm.current(), "Fehler im Zyklus - kehre zu IDLE zurück");
+
+            // Fehlerton nur, wenn der Zyklus bereits über die Wake-Word-
+            // Erkennung hinaus war: dort wartet jemand hörbar auf eine
+            // Antwort. Ein dauerhaft fehlschlagendes Wake-Word-Kommando würde
+            // sonst im Sekundentakt Fehlertöne erzeugen.
+            if sm.current() != State::ListeningForWakeword {
+                if let Err(se) = sound::play_error_chime(&cfg.sound).await {
+                    warn!(error = %se, "Konnte Fehlerton nicht abspielen");
+                }
+            }
+
             let _ = sm.transition(State::Idle);
 
             // Verhindert einen ungebremsten Busy-Loop, falls z. B. das
@@ -166,8 +191,11 @@ async fn run_cycle_inner(
     // Solange eine Runde tatsächlich eine Antwort hervorbringt, bleibt der
     // Kanal für eine direkte Folgeeingabe offen - ohne dass das Wake-Word
     // erneut gesagt werden muss. Erst eine Runde ohne Sprache/Antwort
-    // schließt den Kanal wieder (mit Ton als Signal, siehe unten).
-    let mut is_followup_turn = false;
+    // schließt den Kanal wieder (mit Ton als Signal, siehe unten), spätestens
+    // aber `conversation.max_followup_turns` Folgerunden nach dem Wake-Word:
+    // sonst können Fremdgeräusche im Raum (z. B. ein laufender Fernseher) den
+    // Kanal beliebig lange offen halten.
+    let mut followup_turns: u32 = 0;
 
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -229,7 +257,29 @@ async fn run_cycle_inner(
             String::new()
         };
         info!(%transcript, "Transkription abgeschlossen");
-        transcript_log::log_input(&cfg.transcription_log, &transcript).await;
+
+        // Whisper macht aus TV-/Hintergrundton gerne Abspann-Halluzinationen
+        // ("Untertitelung des ZDF, ..."). Die zählen nicht als Eingabe -
+        // sonst antwortet der Agent auf den Fernseher und hält den Kanal
+        // dadurch offen.
+        let transcript = match transcript_filter::matching_pattern(
+            &cfg.transcript_filter.ignored_patterns,
+            &transcript,
+        ) {
+            Some(pattern) => {
+                warn!(
+                    %transcript,
+                    %pattern,
+                    "Transkript als Störgeräusch/Halluzination verworfen"
+                );
+                transcript_log::log_input_ignored(&cfg.transcription_log, &transcript).await;
+                String::new()
+            }
+            None => {
+                transcript_log::log_input(&cfg.transcription_log, &transcript).await;
+                transcript
+            }
+        };
 
         sm.transition(State::SendingToOpenClaw)?;
         let response = if transcript.trim().is_empty() {
@@ -257,12 +307,10 @@ async fn run_cycle_inner(
                 transcript_log::OutputOutcome::Skipped,
             )
             .await;
-            if is_followup_turn {
+            if followup_turns > 0 {
                 // Kein Folge-Input erkannt - Kanal schließen und akustisch
                 // markieren, dass ab jetzt wieder das Wake-Word nötig ist.
-                if let Err(e) = sound::play_chime(&cfg.sound).await {
-                    warn!(error = %e, "Konnte Kanal-geschlossen-Ton nicht abspielen");
-                }
+                close_channel_audibly(cfg).await;
             }
             sm.transition(State::Idle)?;
             return Ok(());
@@ -295,7 +343,25 @@ async fn run_cycle_inner(
             sm.transition(State::Idle)?;
             return Ok(());
         }
-        is_followup_turn = true;
+
+        if followup_turns >= cfg.conversation.max_followup_turns {
+            info!(
+                max_followup_turns = cfg.conversation.max_followup_turns,
+                "Maximale Zahl an Folgeeingaben erreicht - schließe den Kanal"
+            );
+            close_channel_audibly(cfg).await;
+            sm.transition(State::Idle)?;
+            return Ok(());
+        }
+        followup_turns += 1;
+    }
+}
+
+/// Markiert das Schließen des Kanals mit einem Ton: ab hier ist wieder das
+/// Wake-Word nötig. Fehler beim Abspielen sind unkritisch.
+async fn close_channel_audibly(cfg: &Config) {
+    if let Err(e) = sound::play_chime(&cfg.sound).await {
+        warn!(error = %e, "Konnte Kanal-geschlossen-Ton nicht abspielen");
     }
 }
 
@@ -373,11 +439,7 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
 }
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {
-    let base = cfg
-        .general
-        .temp_dir
-        .clone()
-        .unwrap_or_else(std::env::temp_dir);
+    let base = cfg.general.temp_base();
     let dir = base.join(format!("claw-voice-bridge-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).with_context(|| {
         format!(
