@@ -21,9 +21,29 @@ Ausgangspunkt für künftige Iterationen.
 
 ## Empfohlene Verbesserungen direkt am Rust-Code
 
-1. Start-Glassound **vor** dem Öffnen des Mikrofons abspielen. Aktuell kann
-   der Ton bei einem Lautsprecher mit integriertem Mikrofon (z. B. Anker
-   PowerConf S330) in der eigenen Aufnahme landen.
+1. ~~Start-Glassound **vor** dem Öffnen des Mikrofons abspielen.~~
+   **Umgesetzt - und war die eigentliche Ursache des Halluzinations-Loops,
+   nicht nur ein Qualitätsthema:** Der Ton landete beim Speakerphone (Anker
+   PowerConf S330) laut in der eigenen Aufnahme. Gut eine Sekunde über dem
+   RMS-Schwellwert genügt, um `min_speech_ms` zu überschreiten - die VAD
+   meldete deshalb bei *jeder* Aufnahme "Sprache erkannt", der Whisper-Skip
+   aus Punkt 12 konnte nie greifen, und Whisper halluzinierte aus faktischer
+   Stille Text, der als Eingabe den Kanal offen hielt. Der Ton läuft jetzt
+   vor dem Öffnen des Mikrofons, gefolgt von `audio.mic_open_delay_ms`
+   (Standard 200 ms) für das Ausklingen von Lautsprecher und Raum; der
+   Ende-Ton erst nach dem Schließen. Im `transcription.log` war das als
+   `[Input] "* Ding *"` sichtbar - der eigene Ton, von Whisper als
+   Nicht-Sprach-Ereignis transkribiert.
+
+   Zusammen damit behoben: `SilenceTracker` addierte `speech_ms` kumulativ
+   über die gesamte Aufnahme, statt zusammenhängende Sprache zu messen. Bei
+   30-ms-Frames reichten zehn verstreute laute Frames irgendwo in bis zu 60
+   Sekunden. Ein Reset nach `vad.speech_gap_ms` (Standard 200 ms)
+   zusammenhängender Stille stellt die dokumentierte Semantik "am Stück"
+   her, ohne Silbenpausen abzuschneiden. Das erklärt auch die im Feldtest
+   beobachtete Asymmetrie: `silence_ms` wurde bei jedem lauten Frame
+   zurückgesetzt, der Stille-Timeout funktionierte deshalb einwandfrei,
+   während das Sprach-Gate praktisch immer offen war.
 2. Audioaufnahme robuster machen: Ringbuffer statt Allokationen im
    Echtzeit-Callback; stabile Behandlung von Sample-Rate und Kanalzahl.
 3. Shutdown/Abbruch in **allen** Phasen unterstützen: Wakeword, Aufnahme,
@@ -72,6 +92,10 @@ Ausgangspunkt für künftige Iterationen.
     übersprungen, statt Whisper aus Stille etwas heraushalluzinieren zu
     lassen. Hängt weiterhin an Punkt 14 (Hintergrundgeräusch über dem
     RMS-Schwellwert würde `speech_started` fälschlich auslösen).
+    **Nachtrag aus dem zweiten Feldtest:** Dieser Skip griff in der Praxis
+    nie, weil `speech_started` durch den mit aufgenommenen Start-Ton und
+    den kumulativen `speech_ms`-Zähler immer gesetzt war - beides in
+    Punkt 1 behoben.
 13. ~~Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
     unterscheidbaren Sound.~~ **Umgesetzt:** Bricht ein Zyklus nach
     erkanntem Wake-Word ab (ffmpeg, whisper-cli, OpenClaw-Adapter, Piper),

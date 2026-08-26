@@ -6,6 +6,11 @@
 # Name des CoreAudio-Eingabegeräts (siehe `system_profiler SPAudioDataType`
 # oder Systemeinstellungen > Ton > Eingabe). Leer/auskommentiert = Systemstandard.
 # device = "MacBook Pro Mikrofon"
+# Pause zwischen dem Start-Ton und dem Öffnen des Mikrofons. Lautsprecher und
+# Raum klingen nach - ohne diese Pause landet das Ausklingen in der eigenen
+# Aufnahme. Bei einem Speakerphone (Lautsprecher + Mikrofon im selben Gerät,
+# z. B. Anker PowerConf S330) ggf. erhöhen.
+mic_open_delay_ms = 200
 
 [wakeword]
 # Konfigurierbares, lokal laufendes Wake-Word-Kommando - keine Cloud-API.
@@ -61,7 +66,13 @@ max_recording_seconds = 60
 silence_rms_threshold = 0.02
 # Mindestdauer erkannter Sprache, bevor Stille danach zum Stopp führen darf
 # (verhindert, dass ein kurzes Klick-Geräusch die Aufnahme sofort beendet).
+# Gilt zusammenhängend, siehe speech_gap_ms.
 min_speech_ms = 300
+# Zusammenhängende Stille, nach der ein laufender Sprach-Abschnitt als beendet
+# gilt und min_speech_ms wieder von vorn zählt. Verhindert, dass sich
+# verstreute laute Frames über die ganze Aufnahme zu "Sprache erkannt"
+# aufaddieren; kurze Pausen zwischen Silben bleiben unschädlich.
+speech_gap_ms = 200
 # Analysefenster für die VAD-Energiemessung.
 frame_ms = 30
 

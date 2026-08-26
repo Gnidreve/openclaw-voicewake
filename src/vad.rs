@@ -16,6 +16,7 @@ pub struct SilenceTracker {
     silence_timeout_ms: u64,
     max_recording_ms: u64,
     min_speech_ms: u64,
+    speech_gap_ms: u64,
     elapsed_ms: u64,
     silence_ms: u64,
     speech_ms: u64,
@@ -29,6 +30,7 @@ impl SilenceTracker {
             silence_timeout_ms: cfg.silence_timeout_ms,
             max_recording_ms: cfg.max_recording_seconds * 1000,
             min_speech_ms: cfg.min_speech_ms,
+            speech_gap_ms: cfg.speech_gap_ms,
             elapsed_ms: 0,
             silence_ms: 0,
             speech_ms: 0,
@@ -47,6 +49,17 @@ impl SilenceTracker {
             }
         } else {
             self.silence_ms += frame_ms;
+            // `min_speech_ms` misst zusammenhängende Sprache. Ohne diesen
+            // Reset addieren sich einzelne laute Frames über die gesamte
+            // Aufnahme (bis `max_recording_seconds`) auf, sodass verstreutes
+            // Geräusch das Gate öffnet - bei 30-ms-Frames und 300 ms
+            // Mindestdauer reichen dafür zehn Frames irgendwo in einer Minute.
+            // Kurze Pausen zwischen Silben dürfen den Lauf aber nicht
+            // abbrechen, deshalb erst nach `speech_gap_ms` zusammenhängender
+            // Stille.
+            if self.silence_ms >= self.speech_gap_ms {
+                self.speech_ms = 0;
+            }
         }
 
         if self.elapsed_ms >= self.max_recording_ms {
@@ -61,7 +74,8 @@ impl SilenceTracker {
     }
 
     /// Ob während der Aufnahme jemals RMS-Energie über `silence_rms_threshold`
-    /// für mindestens `min_speech_ms` am Stück lag. `false` bedeutet: die
+    /// für mindestens `min_speech_ms` am Stück lag (Pausen bis
+    /// `speech_gap_ms` unterbrechen den Lauf nicht). `false` bedeutet: die
     /// gesamte Aufnahme war (aus VAD-Sicht) Stille/Hintergrundrauschen -
     /// unabhängig davon, was Whisper aus dem Audio heraushalluzinieren würde,
     /// sollte es trotzdem transkribiert werden.
@@ -82,12 +96,16 @@ pub fn rms(samples: &[f32]) -> f32 {
 mod tests {
     use super::*;
 
+    const LOUD: f32 = 0.1;
+    const QUIET: f32 = 0.0;
+
     fn cfg() -> VadConfig {
         VadConfig {
             silence_timeout_ms: 4000,
             max_recording_seconds: 60,
             silence_rms_threshold: 0.02,
             min_speech_ms: 300,
+            speech_gap_ms: 200,
             frame_ms: 30,
         }
     }
@@ -160,6 +178,105 @@ mod tests {
         for _ in 0..15 {
             t.push_frame(0.1, 30);
         }
+        assert!(t.speech_started());
+    }
+
+    /// Regression für den Feldtest-Bug: `speech_ms` wurde nie zurückgesetzt,
+    /// also addierten sich einzelne laute Frames über die gesamte Aufnahme zu
+    /// "Sprache erkannt" auf. Hier sind es 30 laute Frames (900 ms, also weit
+    /// über `min_speech_ms`), aber jeder einzeln zwischen Stille - das ist
+    /// Geräusch, keine Sprache.
+    #[test]
+    fn scattered_loud_frames_never_count_as_speech() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..30 {
+            t.push_frame(LOUD, 30);
+            // 10 stille Frames = 300 ms > speech_gap_ms
+            for _ in 0..10 {
+                t.push_frame(QUIET, 30);
+            }
+        }
+        assert!(
+            !t.speech_started(),
+            "verstreute laute Einzelframes dürfen das Sprach-Gate nicht öffnen"
+        );
+    }
+
+    /// Der Startton (~1 s über der Schwelle, direkt am Anfang) hat vor dem Fix
+    /// jede Aufnahme als "Sprache" markiert. Er kommt jetzt vor dem Öffnen des
+    /// Mikrofons - träfe er die Aufnahme doch, wäre er zusammenhängend und
+    /// damit auch weiterhin ununterscheidbar von Sprache. Der Test hält
+    /// deshalb fest, was der Tracker leisten kann und was nicht: eine
+    /// zusammenhängende laute Passage zählt als Sprache.
+    #[test]
+    fn one_continuous_loud_passage_counts_as_speech() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..10 {
+            t.push_frame(LOUD, 30);
+        }
+        assert!(t.speech_started());
+    }
+
+    #[test]
+    fn short_pauses_between_syllables_do_not_reset_the_speech_run() {
+        let mut t = SilenceTracker::new(&cfg());
+        // 5 Frames Sprache (150 ms)
+        for _ in 0..5 {
+            t.push_frame(LOUD, 30);
+        }
+        // kurze Silbenpause: 5 * 30 ms = 150 ms < speech_gap_ms (200 ms)
+        for _ in 0..5 {
+            t.push_frame(QUIET, 30);
+        }
+        assert!(!t.speech_started(), "150 ms allein reichen noch nicht");
+        // weitere 5 Frames Sprache - zusammen 300 ms, der Lauf wurde nicht
+        // abgebrochen
+        for _ in 0..5 {
+            t.push_frame(LOUD, 30);
+        }
+        assert!(
+            t.speech_started(),
+            "eine kurze Pause darf den Sprach-Lauf nicht zurücksetzen"
+        );
+    }
+
+    #[test]
+    fn a_long_pause_resets_the_speech_run() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..5 {
+            t.push_frame(LOUD, 30);
+        }
+        // 210 ms Stille >= speech_gap_ms -> Lauf beginnt von vorn
+        for _ in 0..7 {
+            t.push_frame(QUIET, 30);
+        }
+        for _ in 0..5 {
+            t.push_frame(LOUD, 30);
+        }
+        assert!(
+            !t.speech_started(),
+            "nach einer langen Pause zählt min_speech_ms wieder von vorn"
+        );
+    }
+
+    #[test]
+    fn silence_timeout_still_works_after_the_speech_run_was_reset() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..15 {
+            t.push_frame(LOUD, 30);
+        }
+        assert!(t.speech_started());
+
+        // Der Reset von speech_ms darf speech_started nicht zurücknehmen -
+        // sonst würde der Stille-Timeout nie greifen.
+        let mut last = VadDecision::Continue;
+        for _ in 0..(4000 / 30 + 2) {
+            last = t.push_frame(QUIET, 30);
+            if last != VadDecision::Continue {
+                break;
+            }
+        }
+        assert_eq!(last, VadDecision::StopSilence);
         assert!(t.speech_started());
     }
 
