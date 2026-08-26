@@ -109,11 +109,7 @@ path = "transcription.log"
 ffmpeg_binary = "ffmpeg"
 # temp_dir = "/tmp"
 log_level = "info"
-# Verhindert, dass versehentlich zwei claw-voice-bridge-Prozesse gleichzeitig
-# laufen: jeder würde einen eigenen Wake-Word-Listener starten und parallel auf
-# dasselbe Mikrofon zugreifen. Der zweite Start bricht dann mit einer klaren
-# Meldung inkl. PID der laufenden Instanz ab.
-single_instance = true
-# Sperrdatei dafür. Standard: <temp_dir>/claw-voice-bridge.lock bzw. im
-# Systemtemp-Verzeichnis.
-# lock_file = "/tmp/claw-voice-bridge.lock"
+# Hinweis: Es kann immer nur eine claw-voice-bridge-Instanz gleichzeitig
+# laufen (Sperrdatei im Systemtemp-Verzeichnis, nicht konfigurierbar). Ein
+# zweiter Start bricht mit einer klaren Meldung inkl. PID der laufenden
+# Instanz ab, siehe README.

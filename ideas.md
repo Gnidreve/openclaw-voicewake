@@ -93,9 +93,11 @@ Ausgangspunkt für künftige Iterationen.
     Feldtest zeigte das Wakeword-Debug-Log pro Zyklus zwei Listener-Starts
     mit unterschiedlichen Eltern-PIDs - es liefen also versehentlich zwei
     Bridges parallel, die sich um Mikrofon und Listener stritten. Der Start
-    belegt jetzt eine `flock`-Sperre (`general.lock_file`); ein zweiter
-    Start bricht mit Nennung der laufenden PID ab. Abschaltbar über
-    `general.single_instance = false`.
+    belegt jetzt eine `flock`-Sperre auf einer festen Datei im
+    Systemtemp-Verzeichnis; ein zweiter Start bricht mit Nennung der
+    laufenden PID ab. Bewusst ohne Konfigurationsschalter und unabhängig von
+    `general.temp_dir` - Parallelbetrieb ist nicht vorgesehen, und jede
+    Konfigurierbarkeit des Pfades wäre ein Weg, die Sperre auszuhebeln.
 16. ~~Fremdgeräusche (TV) halten den Folgeeingabe-Kanal offen.~~
     **Umgesetzt, zwei Maßnahmen:** (a) `transcript_filter.ignored_patterns`
     verwirft Transkripte mit typischen Whisper-Abspann-Halluzinationen

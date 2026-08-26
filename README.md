@@ -121,9 +121,14 @@ Gesprächsrunden umfassen, solange der Kanal offen bleibt (siehe
 ### Nur eine Instanz gleichzeitig
 
 Beim Start belegt `claw-voice-bridge` eine `flock`-Sperre auf
-`general.lock_file` (Standard: `<temp_dir>/claw-voice-bridge.lock`). Läuft
-bereits eine Instanz, bricht der zweite Start mit einer Meldung inklusive
-der PID der laufenden Instanz ab, statt still danebenzulaufen.
+`claw-voice-bridge.lock` im Systemtemp-Verzeichnis. Läuft bereits eine
+Instanz, bricht der zweite Start mit einer Meldung inklusive der PID der
+laufenden Instanz ab, statt still danebenzulaufen.
+
+Parallelbetrieb ist nicht vorgesehen, entsprechend gibt es dafür **keinen
+Schalter**: Der Sperrpfad ist fest und hängt bewusst auch nicht an
+`general.temp_dir` - sonst ließe sich die Sperre über zwei Konfigurationen
+mit unterschiedlichen Pfaden aushebeln.
 
 Der Hintergrund stammt aus dem Feldtest: Zwei parallel laufende Bridges
 starten je einen eigenen Wake-Word-Listener, beide greifen auf dasselbe
@@ -136,9 +141,6 @@ Listener-Starts pro Zyklus. Das gilt auch für einen `--dry-run`- oder
 Die Sperre wird vom Kernel gehalten und beim Prozessende automatisch
 freigegeben - auch bei `SIGKILL` oder Absturz. Eine übrig gebliebene
 Sperrdatei blockiert deshalb nichts und muss nicht aufgeräumt werden.
-Bewusster Parallelbetrieb (z. B. zwei Instanzen an zwei verschiedenen
-Mikrofonen) lässt sich mit `general.single_instance = false` bzw. einer
-eigenen `general.lock_file` je Instanz einschalten.
 
 ### Wake-Word-Schwellwert
 

@@ -10,12 +10,23 @@
 //! gehalten, solange der Prozess lebt, und automatisch freigegeben, wenn er
 //! endet - auch bei SIGKILL oder Absturz. Eine übrig gebliebene Sperrdatei ist
 //! deshalb nie "stale": entscheidend ist die Sperre, nicht die Datei.
+//!
+//! Der Sperrpfad ist bewusst **nicht** konfigurierbar und hängt auch nicht an
+//! `general.temp_dir`: Jede Konfigurierbarkeit wäre ein Weg, die Sperre durch
+//! zwei Konfigurationen mit unterschiedlichen Pfaden auszuhebeln. Parallel
+//! laufende Instanzen sind nicht vorgesehen.
 
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{info, warn};
+
+/// Fester Pfad der Sperrdatei im Systemtemp-Verzeichnis (unter macOS je
+/// Benutzer, was der Reichweite des Dienstes entspricht).
+pub fn lock_path() -> PathBuf {
+    std::env::temp_dir().join("claw-voice-bridge.lock")
+}
 
 /// Hält die Sperre, solange dieser Wert lebt. Beim Drop (bzw. spätestens beim
 /// Prozessende) wird sie freigegeben.
@@ -50,9 +61,9 @@ impl InstanceLock {
             let holder = read_pid(&mut file);
             anyhow::bail!(
                 "Es läuft bereits eine claw-voice-bridge-Instanz{} (Sperrdatei: {}). \
-                 Zwei Instanzen würden sich um Mikrofon und Wake-Word-Listener streiten. \
-                 Beende die laufende Instanz, oder setze general.single_instance = false, \
-                 wenn das wirklich gewollt ist.",
+                 Zwei Instanzen würden sich um Mikrofon und Wake-Word-Listener streiten; \
+                 Parallelbetrieb ist deshalb nicht vorgesehen. Beende zuerst die laufende \
+                 Instanz.",
                 holder
                     .map(|pid| format!(" mit PID {pid}"))
                     .unwrap_or_default(),
@@ -113,8 +124,9 @@ fn try_lock(_file: &File) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
+    /// Die Tests belegen bewusst nicht `lock_path()`: das würde eine echte,
+    /// nebenher laufende Instanz aussperren (und umgekehrt).
     fn temp_lock_path() -> PathBuf {
         std::env::temp_dir().join(format!(
             "claw-voice-bridge-test-{}.lock",
@@ -157,6 +169,14 @@ mod tests {
             .expect("nach Freigabe muss die Sperre wieder belegbar sein");
         drop(again);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn lock_path_is_fixed_and_independent_of_the_configured_temp_dir() {
+        assert_eq!(
+            lock_path(),
+            std::env::temp_dir().join("claw-voice-bridge.lock")
+        );
     }
 
     #[test]
