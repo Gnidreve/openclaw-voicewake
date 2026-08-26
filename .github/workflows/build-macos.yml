@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -48,7 +50,9 @@ jobs:
           retention-days: 14
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        # Tag gepusht (z. B. per `git push origin <tag>`), aber noch keine
+        # Release dazu vorhanden - Release inkl. ZIP-Anhang neu anlegen.
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -57,3 +61,16 @@ jobs:
             claw-voice-bridge-macos.zip \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+      - name: Attach ZIP to existing Release
+        # Release wurde bereits erstellt (z. B. über die GitHub-UI, was den
+        # push-Trigger auf den Tag oft nicht zuverlässig auslöst) - hier nur
+        # noch das ZIP an die vorhandene Release anhängen.
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.event.release.tag_name }}" \
+            claw-voice-bridge-macos.zip \
+            --clobber
