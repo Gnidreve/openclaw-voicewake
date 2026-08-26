@@ -301,11 +301,9 @@ async fn run_cycle_inner(
                 transcript_log::OutputOutcome::Skipped,
             )
             .await;
-            if followup_turns > 0 {
-                // Kein Folge-Input erkannt - Kanal schließen und akustisch
-                // markieren, dass ab jetzt wieder das Wake-Word nötig ist.
-                close_channel_audibly(cfg).await;
-            }
+            // Bewusst ohne eigenen Ton: Wurde nichts erkannt, ist bereits der
+            // Absende-Ton ausgeblieben - ein zusätzlicher, gleich klingender
+            // Ton würde nur verwirren.
             sm.transition(State::Idle)?;
             return Ok(());
         }
@@ -343,19 +341,12 @@ async fn run_cycle_inner(
                 max_followup_turns = cfg.conversation.max_followup_turns,
                 "Maximale Zahl an Folgeeingaben erreicht - schließe den Kanal"
             );
-            close_channel_audibly(cfg).await;
+            // Ebenfalls ohne eigenen Ton: Dass der Kanal zu ist, hört man
+            // daran, dass nach der Antwort kein Start-Ton mehr kommt.
             sm.transition(State::Idle)?;
             return Ok(());
         }
         followup_turns += 1;
-    }
-}
-
-/// Markiert das Schließen des Kanals mit einem Ton: ab hier ist wieder das
-/// Wake-Word nötig. Fehler beim Abspielen sind unkritisch.
-async fn close_channel_audibly(cfg: &Config) {
-    if let Err(e) = sound::play_chime(&cfg.sound).await {
-        warn!(error = %e, "Konnte Kanal-geschlossen-Ton nicht abspielen");
     }
 }
 
@@ -442,11 +433,20 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
     // sein, solange wirklich aufgenommen wird.
     drop(capture);
 
-    if let Err(e) = sound::play_chime(&cfg.sound).await {
-        warn!(error = %e, "Konnte Aufnahme-Ende-Ton nicht abspielen");
+    // Der zweite Ton bestätigt das Absenden, nicht bloß das Ende der
+    // Aufnahme. Wurde keine Sprache erkannt, geht auch nichts an OpenClaw -
+    // dann bleibt er aus, und genau dieses Ausbleiben ist das Signal
+    // "nichts verstanden, nichts abgeschickt".
+    let speech_detected = tracker.speech_started();
+    if speech_detected {
+        if let Err(e) = sound::play_chime(&cfg.sound).await {
+            warn!(error = %e, "Konnte Absende-Ton nicht abspielen");
+        }
+    } else {
+        info!("Keine Sprache erkannt - kein Absende-Ton, es wird nichts gesendet");
     }
 
-    Ok(tracker.speech_started())
+    Ok(speech_detected)
 }
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {

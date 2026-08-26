@@ -144,6 +144,27 @@ Ausgangspunkt für künftige Iterationen.
     länger als eine Stunde her, wird vor dem nächsten Aufruf erst ein
     Session-Reset (z. B. `/new` o. Ä. - genaue Umsetzung offen) gesendet.
     Schwelle und Mechanismus müssen noch entschieden werden.
+19. ~~Der dritte Glass-Ton ("Kanal geschlossen") war nicht unterscheidbar
+    und dadurch eher verwirrend als hilfreich.~~ **Umgesetzt:** Die
+    Ton-Sprache hat jetzt genau zwei Signale mit klarer Bedeutung. Der
+    Ende-Ton hängt an `speech_started` und bestätigt damit das **Absenden**,
+    nicht bloß das Ende der Aufnahme; bleibt er aus, wurde nichts erkannt
+    und es geht nichts an OpenClaw. Der eigene "Kanal geschlossen"-Ton
+    entfällt ersatzlos - dass der Kanal zu ist, hört man daran, dass nach
+    einer Antwort kein neuer Start-Ton mehr kommt. Offen bleibt der Fall
+    "abgeschickt, aber OpenClaw liefert keine Antwort" (`[Output] skipped`):
+    aktuell tonlos, Kandidat wäre der Fehlerton.
+20. Bei totaler Stille greift der Stille-Timeout nicht, weil er erkannte
+    Sprache voraussetzt (`speech_started && silence_ms >= …`) - die
+    Aufnahme läuft dann bis `max_recording_seconds`, also bis zu 60
+    Sekunden. Vor der Korrektur aus Punkt 1 fiel das nie auf, weil der mit
+    aufgenommene Start-Ton `speech_started` immer gesetzt hat. Damit das
+    Ausbleiben des Absende-Tons (Punkt 19) zeitnah als Signal taugt, sollte
+    die Uhr auch ohne erkannte Sprache ablaufen dürfen. Naheliegend: die
+    Bedingung `speech_started &&` streichen und die Zeit bis zum ersten
+    Sprechen von der Pause nach dem Sprechen entkoppeln (zwei Werte statt
+    einem) - dann lässt sich die Pause nach dem Sprechen deutlich kürzer
+    stellen, ohne Zögern am Anfang zu bestrafen. Noch nicht entschieden.
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
