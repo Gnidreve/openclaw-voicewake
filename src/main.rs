@@ -47,15 +47,9 @@ async fn main() -> Result<()> {
 
     // Muss vor allem anderen greifen: zwei gleichzeitig laufende Instanzen
     // starten je einen eigenen Wake-Word-Listener und greifen parallel auf
-    // dasselbe Mikrofon zu. Die Sperre lebt bis zum Ende von `main`.
-    let _instance_lock = if cfg.general.single_instance {
-        Some(instance_lock::InstanceLock::acquire(
-            &cfg.general.lock_path(),
-        )?)
-    } else {
-        warn!("general.single_instance = false - mehrere Instanzen können sich um das Mikrofon streiten");
-        None
-    };
+    // dasselbe Mikrofon zu. Parallelbetrieb ist nicht vorgesehen, die Sperre
+    // deshalb ohne Ausnahme. Sie lebt bis zum Ende von `main`.
+    let _instance_lock = instance_lock::InstanceLock::acquire(&instance_lock::lock_path())?;
 
     let shutdown = Arc::new(AtomicBool::new(false));
     spawn_signal_handler(shutdown.clone());

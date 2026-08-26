@@ -220,12 +220,6 @@ pub struct GeneralConfig {
     pub ffmpeg_binary: String,
     pub temp_dir: Option<PathBuf>,
     pub log_level: String,
-    /// Verhindert, dass mehrere claw-voice-bridge-Prozesse gleichzeitig laufen
-    /// und sich um Mikrofon und Wake-Word-Listener streiten.
-    pub single_instance: bool,
-    /// Pfad der Sperrdatei für `single_instance`. `None` = `<temp_dir>/
-    /// claw-voice-bridge.lock` bzw. das Systemtemp-Verzeichnis.
-    pub lock_file: Option<PathBuf>,
 }
 impl Default for GeneralConfig {
     fn default() -> Self {
@@ -233,23 +227,16 @@ impl Default for GeneralConfig {
             ffmpeg_binary: "ffmpeg".to_string(),
             temp_dir: None,
             log_level: "info".to_string(),
-            single_instance: true,
-            lock_file: None,
         }
     }
 }
 
 impl GeneralConfig {
-    /// Verzeichnis, unter dem temporäre Zyklusdaten und (per Default) die
-    /// Sperrdatei liegen.
+    /// Verzeichnis, unter dem die temporären Zyklusdaten liegen. Bewusst
+    /// ohne Einfluss auf die Einzelinstanz-Sperre - deren Pfad ist fest,
+    /// siehe `instance_lock::lock_path`.
     pub fn temp_base(&self) -> PathBuf {
         self.temp_dir.clone().unwrap_or_else(std::env::temp_dir)
-    }
-
-    pub fn lock_path(&self) -> PathBuf {
-        self.lock_file
-            .clone()
-            .unwrap_or_else(|| self.temp_base().join("claw-voice-bridge.lock"))
     }
 }
 
@@ -379,23 +366,17 @@ mod tests {
     }
 
     #[test]
-    fn lock_path_defaults_into_the_temp_base_directory() {
-        let mut cfg = GeneralConfig {
+    fn temp_base_follows_the_configured_temp_dir() {
+        let cfg = GeneralConfig {
             temp_dir: Some(PathBuf::from("/tmp/voicewake")),
             ..Default::default()
         };
+        assert_eq!(cfg.temp_base(), PathBuf::from("/tmp/voicewake"));
         assert_eq!(
-            cfg.lock_path(),
-            PathBuf::from("/tmp/voicewake/claw-voice-bridge.lock")
+            GeneralConfig::default().temp_base(),
+            std::env::temp_dir(),
+            "ohne temp_dir gilt das Systemtemp-Verzeichnis"
         );
-
-        cfg.lock_file = Some(PathBuf::from("/var/run/eigene.lock"));
-        assert_eq!(cfg.lock_path(), PathBuf::from("/var/run/eigene.lock"));
-    }
-
-    #[test]
-    fn single_instance_is_on_by_default() {
-        assert!(Config::default().general.single_instance);
     }
 
     #[test]
@@ -453,7 +434,6 @@ mod tests {
         // landet.
         assert_eq!(cfg.conversation.max_followup_turns, 3);
         assert!(!cfg.transcript_filter.ignored_patterns.is_empty());
-        assert!(cfg.general.single_instance);
         assert_ne!(cfg.sound.error_chime_path, cfg.sound.chime_path);
     }
 
