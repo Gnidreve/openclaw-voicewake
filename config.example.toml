@@ -18,6 +18,37 @@ command = "openwakeword-listener"
 args = ["--model", "hey_claw"]
 trigger_pattern = "WAKE"
 restart_delay_ms = 500
+# Hinweis zum Schwellwert des Listeners (wird im Listener selbst gesetzt, nicht
+# hier - z. B. `--threshold`): Im Feldtest lagen echte Wake-Word-Treffer bei
+# 0.50-0.98, ruhiges Grundrauschen erreichte aber bereits ~0.20. Ein
+# Schwellwert von 0.1 hat deshalb sofort ohne gesprochenes Wake-Word
+# ausgelöst; 0.5 hat sich als brauchbarer Startwert bewährt.
+
+[conversation]
+# Wie viele Folgeeingaben nach einer vorgelesenen Antwort ohne erneutes
+# Wake-Word möglich sind (siehe README, Zustandsmaschine). Begrenzt den
+# offenen Kanal, damit Fremdgeräusche (laufender Fernseher o. Ä.) ihn nicht
+# endlos offen halten. 0 = Folgeeingaben aus, nach jeder Antwort ist wieder
+# das Wake-Word nötig (der Kanal-geschlossen-Ton kommt dann nach jeder
+# Antwort).
+max_followup_turns = 3
+
+[transcript_filter]
+# Transkripte, die eines dieser Muster enthalten, werden wie "keine Sprache"
+# behandelt: kein OpenClaw-Aufruf, der Kanal wird geschlossen. Gedacht gegen
+# die typischen Whisper-Halluzinationen aus TV-/Hintergrundton. Vergleich ist
+# normalisiert (Kleinschreibung, Satzzeichen egal) und sucht Teilstrings.
+# Leere Liste = Filter aus. Die hier gezeigte Liste ist zugleich der Default.
+ignored_patterns = [
+  "Untertitelung des ZDF",
+  "Untertitel im Auftrag des ZDF",
+  "Untertitelung im Auftrag des ZDF",
+  "Untertitel von Stephanie Geiges",
+  "Untertitelung aufgrund der Amara.org-Community",
+  "Untertitel der Amara.org-Community",
+  "Vielen Dank fürs Zuschauen",
+  "Copyright WDR",
+]
 
 [vad]
 # Stille-Timeout: Aufnahme endet, nachdem nach erkannter Sprache diese
@@ -62,6 +93,9 @@ timeout_secs = 30
 # Bestätigungston bei Aufnahme-Start und -Ende (macOS-Systemsound "Glass").
 enabled = true
 chime_path = "/System/Library/Sounds/Glass.aiff"
+# Deutlich anders klingender Ton für abgebrochene Zyklen (macOS "Basso") -
+# damit ein Fehler hörbar ist und nicht nur im Log steht.
+error_chime_path = "/System/Library/Sounds/Basso.aiff"
 player_binary = "afplay"
 timeout_secs = 5
 
@@ -75,3 +109,11 @@ path = "transcription.log"
 ffmpeg_binary = "ffmpeg"
 # temp_dir = "/tmp"
 log_level = "info"
+# Verhindert, dass versehentlich zwei claw-voice-bridge-Prozesse gleichzeitig
+# laufen: jeder würde einen eigenen Wake-Word-Listener starten und parallel auf
+# dasselbe Mikrofon zugreifen. Der zweite Start bricht dann mit einer klaren
+# Meldung inkl. PID der laufenden Instanz ab.
+single_instance = true
+# Sperrdatei dafür. Standard: <temp_dir>/claw-voice-bridge.lock bzw. im
+# Systemtemp-Verzeichnis.
+# lock_file = "/tmp/claw-voice-bridge.lock"

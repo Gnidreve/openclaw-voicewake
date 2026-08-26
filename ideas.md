@@ -72,10 +72,14 @@ Ausgangspunkt für künftige Iterationen.
     übersprungen, statt Whisper aus Stille etwas heraushalluzinieren zu
     lassen. Hängt weiterhin an Punkt 14 (Hintergrundgeräusch über dem
     RMS-Schwellwert würde `speech_started` fälschlich auslösen).
-13. Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
-    unterscheidbaren Sound - damit man akustisch sofort erkennt, ob ein
-    Zyklus normal beendet wurde oder ein Fehler aufgetreten ist, statt nur
-    stumm zurück nach `IDLE` zu gehen bzw. es nur im Log zu sehen.
+13. ~~Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
+    unterscheidbaren Sound.~~ **Umgesetzt:** Bricht ein Zyklus nach
+    erkanntem Wake-Word ab (ffmpeg, whisper-cli, OpenClaw-Adapter, Piper),
+    wird `sound.error_chime_path` abgespielt - Default der macOS-Systemsound
+    "Basso". Fehler *während* der Wake-Word-Erkennung selbst (z. B. fehlendes
+    Listener-Binary) bleiben bewusst stumm, sonst würde der Neustart-Loop im
+    Takt von `restart_delay_ms` dauerhaft Fehlertöne erzeugen. Anlass war ein
+    `[Output] error` im Feldtest, das nur im Log sichtbar war.
 14. Bei ganz leichten Hintergrundgeräuschen wird das Schließen des
     Audio-Channels unterbunden: Liegt die Umgebungslautstärke dauerhaft
     knapp über `silence_rms_threshold`, erkennt die VAD nie "Stille" und
@@ -85,7 +89,30 @@ Ausgangspunkt für künftige Iterationen.
     das minimieren lässt (z. B. adaptiver/dynamischer Schwellwert statt
     fixem `silence_rms_threshold`, oder Rauschprofil zu Beginn der
     Aufnahme kalibrieren).
-15. Wie und wann eine neue OpenClaw-Session gestartet wird, damit eine
+15. ~~Zwei gleichzeitig laufende Bridge-Instanzen.~~ **Umgesetzt:** Im
+    Feldtest zeigte das Wakeword-Debug-Log pro Zyklus zwei Listener-Starts
+    mit unterschiedlichen Eltern-PIDs - es liefen also versehentlich zwei
+    Bridges parallel, die sich um Mikrofon und Listener stritten. Der Start
+    belegt jetzt eine `flock`-Sperre (`general.lock_file`); ein zweiter
+    Start bricht mit Nennung der laufenden PID ab. Abschaltbar über
+    `general.single_instance = false`.
+16. ~~Fremdgeräusche (TV) halten den Folgeeingabe-Kanal offen.~~
+    **Umgesetzt, zwei Maßnahmen:** (a) `transcript_filter.ignored_patterns`
+    verwirft Transkripte mit typischen Whisper-Abspann-Halluzinationen
+    ("Untertitelung des ZDF, 2020" aus dem Feldtest) wie "keine Sprache";
+    (b) `conversation.max_followup_turns` (Default 3) begrenzt den offenen
+    Kanal hart, auch wenn jede Runde eine Antwort erzeugt. Beides bekämpft
+    die Symptome - die Ursache (VAD hält TV-Ton für Sprache) hängt weiter an
+    Punkt 14.
+17. Wake-Word-Schwellwert: Im Feldtest lagen echte Treffer bei Scores von
+    0.50-0.98, das Grundrauschen aber schon bei ~0.20 - mit `--threshold 0.1`
+    löste der Listener sofort ohne gesprochenes Wake-Word aus. 0.5 ist der
+    aktuelle Arbeitswert. Der Schwellwert lebt im Listener, nicht in der
+    Rust-Binary; in README und `config.example.toml` steht er jetzt als
+    Erfahrungswert dokumentiert. Offen: ob der Listener seine Scores
+    dauerhaft mitloggen sollte, um den Wert pro Raum/Mikrofon sauber
+    einstellen zu können.
+18. Wie und wann eine neue OpenClaw-Session gestartet wird, damit eine
     Session nicht unendlich weiterläuft (Kontext wächst sonst
     unbegrenzt). Grobe Idee, noch nicht final: Ist die letzte Nachricht
     länger als eine Stunde her, wird vor dem nächsten Aufruf erst ein

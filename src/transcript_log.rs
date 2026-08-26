@@ -24,6 +24,13 @@ fn format_input_line(transcript: &str) -> String {
     }
 }
 
+/// Bewusst **ohne** Anführungszeichen: der Text wurde gerade nicht als
+/// Eingabe übermittelt. Er steht trotzdem in der Zeile, weil sonst nicht
+/// nachvollziehbar wäre, was der Filter verworfen hat.
+fn format_ignored_input_line(transcript: &str) -> String {
+    format!("[Input] ignored: {}", transcript.trim())
+}
+
 fn format_output_line(outcome: &OutputOutcome<'_>) -> String {
     match outcome {
         OutputOutcome::Success(text) => format!("[Output] \"{}\"", text.trim()),
@@ -34,6 +41,12 @@ fn format_output_line(outcome: &OutputOutcome<'_>) -> String {
 
 pub async fn log_input(cfg: &TranscriptionLogConfig, transcript: &str) {
     write_line(cfg, &format_input_line(transcript)).await;
+}
+
+/// Für ein Transkript, das der Transkript-Filter als Störgeräusch/
+/// Halluzination verworfen hat (siehe `transcript_filter`).
+pub async fn log_input_ignored(cfg: &TranscriptionLogConfig, transcript: &str) {
+    write_line(cfg, &format_ignored_input_line(transcript)).await;
 }
 
 pub async fn log_output(cfg: &TranscriptionLogConfig, outcome: OutputOutcome<'_>) {
@@ -78,6 +91,16 @@ mod tests {
     fn input_line_shows_skipped_for_empty_transcript() {
         assert_eq!(format_input_line(""), "[Input] skipped");
         assert_eq!(format_input_line("   "), "[Input] skipped");
+    }
+
+    #[test]
+    fn ignored_input_line_names_the_discarded_text_without_quotes() {
+        let line = format_ignored_input_line("  Untertitelung des ZDF, 2020 ");
+        assert_eq!(line, "[Input] ignored: Untertitelung des ZDF, 2020");
+        assert!(
+            !line.contains('"'),
+            "verworfener Text darf nicht wie eine übermittelte Eingabe aussehen"
+        );
     }
 
     #[test]

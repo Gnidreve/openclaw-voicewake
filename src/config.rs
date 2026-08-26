@@ -57,6 +57,55 @@ impl Default for VadConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+pub struct ConversationConfig {
+    /// Wie viele Folgeeingaben nach einer vorgelesenen Antwort ohne erneutes
+    /// Wake-Word möglich sind. Begrenzt den offenen Kanal, damit
+    /// Fremdgeräusche (z. B. laufender Fernseher) ihn nicht endlos weiter
+    /// offen halten können. `0` schaltet Folgeeingaben ganz ab - dann ist
+    /// nach jeder Antwort wieder das Wake-Word nötig.
+    pub max_followup_turns: u32,
+}
+impl Default for ConversationConfig {
+    fn default() -> Self {
+        Self {
+            max_followup_turns: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TranscriptFilterConfig {
+    /// Transkripte, die eines dieser Muster enthalten, werden wie "keine
+    /// Sprache" behandelt: kein OpenClaw-Aufruf, Kanal wird geschlossen.
+    /// Gedacht für die typischen Whisper-Halluzinationen aus Hintergrund-/
+    /// TV-Ton (Untertitel-Abspänne o. Ä.). Vergleich erfolgt normalisiert
+    /// (Kleinschreibung, Satzzeichen ignoriert) als Teilstring-Suche.
+    /// Leere Liste = Filter aus.
+    pub ignored_patterns: Vec<String>,
+}
+impl Default for TranscriptFilterConfig {
+    fn default() -> Self {
+        Self {
+            ignored_patterns: [
+                "Untertitelung des ZDF",
+                "Untertitel im Auftrag des ZDF",
+                "Untertitelung im Auftrag des ZDF",
+                "Untertitel von Stephanie Geiges",
+                "Untertitelung aufgrund der Amara.org-Community",
+                "Untertitel der Amara.org-Community",
+                "Vielen Dank fürs Zuschauen",
+                "Copyright WDR",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct WhisperConfig {
     pub binary: String,
     pub model_path: PathBuf,
@@ -129,6 +178,10 @@ pub struct SoundConfig {
     pub enabled: bool,
     /// Abzuspielende Sound-Datei (Standard: macOS-Systemsound "Glass").
     pub chime_path: PathBuf,
+    /// Deutlich unterscheidbarer Ton für abgebrochene Zyklen (Standard:
+    /// macOS-Systemsound "Basso") - damit ein Fehler nicht nur stumm im Log
+    /// landet.
+    pub error_chime_path: PathBuf,
     pub player_binary: String,
     pub timeout_secs: u64,
 }
@@ -137,6 +190,7 @@ impl Default for SoundConfig {
         Self {
             enabled: true,
             chime_path: PathBuf::from("/System/Library/Sounds/Glass.aiff"),
+            error_chime_path: PathBuf::from("/System/Library/Sounds/Basso.aiff"),
             player_binary: "afplay".to_string(),
             timeout_secs: 5,
         }
@@ -166,6 +220,12 @@ pub struct GeneralConfig {
     pub ffmpeg_binary: String,
     pub temp_dir: Option<PathBuf>,
     pub log_level: String,
+    /// Verhindert, dass mehrere claw-voice-bridge-Prozesse gleichzeitig laufen
+    /// und sich um Mikrofon und Wake-Word-Listener streiten.
+    pub single_instance: bool,
+    /// Pfad der Sperrdatei für `single_instance`. `None` = `<temp_dir>/
+    /// claw-voice-bridge.lock` bzw. das Systemtemp-Verzeichnis.
+    pub lock_file: Option<PathBuf>,
 }
 impl Default for GeneralConfig {
     fn default() -> Self {
@@ -173,7 +233,23 @@ impl Default for GeneralConfig {
             ffmpeg_binary: "ffmpeg".to_string(),
             temp_dir: None,
             log_level: "info".to_string(),
+            single_instance: true,
+            lock_file: None,
         }
+    }
+}
+
+impl GeneralConfig {
+    /// Verzeichnis, unter dem temporäre Zyklusdaten und (per Default) die
+    /// Sperrdatei liegen.
+    pub fn temp_base(&self) -> PathBuf {
+        self.temp_dir.clone().unwrap_or_else(std::env::temp_dir)
+    }
+
+    pub fn lock_path(&self) -> PathBuf {
+        self.lock_file
+            .clone()
+            .unwrap_or_else(|| self.temp_base().join("claw-voice-bridge.lock"))
     }
 }
 
@@ -183,6 +259,8 @@ pub struct Config {
     pub audio: AudioConfig,
     pub wakeword: WakeWordConfig,
     pub vad: VadConfig,
+    pub conversation: ConversationConfig,
+    pub transcript_filter: TranscriptFilterConfig,
     pub whisper: WhisperConfig,
     pub openclaw: OpenClawConfig,
     pub tts: TtsConfig,
@@ -280,6 +358,68 @@ mod tests {
     }
 
     #[test]
+    fn error_chime_defaults_to_a_different_sound_than_the_confirmation_chime() {
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.sound.error_chime_path,
+            PathBuf::from("/System/Library/Sounds/Basso.aiff")
+        );
+        assert_ne!(cfg.sound.error_chime_path, cfg.sound.chime_path);
+    }
+
+    #[test]
+    fn conversation_defaults_bound_the_open_channel() {
+        assert_eq!(Config::default().conversation.max_followup_turns, 3);
+    }
+
+    #[test]
+    fn transcript_filter_defaults_cover_known_whisper_hallucinations() {
+        let patterns = Config::default().transcript_filter.ignored_patterns;
+        assert!(patterns.iter().any(|p| p.contains("ZDF")));
+    }
+
+    #[test]
+    fn lock_path_defaults_into_the_temp_base_directory() {
+        let mut cfg = GeneralConfig {
+            temp_dir: Some(PathBuf::from("/tmp/voicewake")),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.lock_path(),
+            PathBuf::from("/tmp/voicewake/claw-voice-bridge.lock")
+        );
+
+        cfg.lock_file = Some(PathBuf::from("/var/run/eigene.lock"));
+        assert_eq!(cfg.lock_path(), PathBuf::from("/var/run/eigene.lock"));
+    }
+
+    #[test]
+    fn single_instance_is_on_by_default() {
+        assert!(Config::default().general.single_instance);
+    }
+
+    #[test]
+    fn explicit_sections_override_defaults_and_leave_the_rest_untouched() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [conversation]
+            max_followup_turns = 7
+
+            [transcript_filter]
+            ignored_patterns = ["Nur dieses Muster"]
+            "#,
+        )
+        .expect("Konfiguration sollte parsen");
+        assert_eq!(cfg.conversation.max_followup_turns, 7);
+        assert_eq!(
+            cfg.transcript_filter.ignored_patterns,
+            ["Nur dieses Muster"]
+        );
+        // Nicht gesetzte Abschnitte behalten ihre Defaults.
+        assert_eq!(cfg.vad.silence_timeout_ms, 4000);
+    }
+
+    #[test]
     fn transcription_log_defaults_enabled_with_relative_path() {
         let cfg = Config::default();
         assert!(cfg.transcription_log.enabled);
@@ -300,6 +440,21 @@ mod tests {
         let mut cfg = Config::default();
         cfg.openclaw.target_channel = "voice-assistant".to_string();
         assert!(cfg.validate(true).is_ok());
+    }
+
+    #[test]
+    fn shipped_example_config_still_parses_and_validates() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.example.toml");
+        let cfg = Config::load(&path).expect("config.example.toml sollte ladbar sein");
+        cfg.validate(true)
+            .expect("config.example.toml sollte die Validierung bestehen");
+        // Stichproben aus den Abschnitten, die zuletzt dazugekommen sind -
+        // damit ein neues Feld nicht nur im Code, sondern auch im Beispiel
+        // landet.
+        assert_eq!(cfg.conversation.max_followup_turns, 3);
+        assert!(!cfg.transcript_filter.ignored_patterns.is_empty());
+        assert!(cfg.general.single_instance);
+        assert_ne!(cfg.sound.error_chime_path, cfg.sound.chime_path);
     }
 
     #[test]
