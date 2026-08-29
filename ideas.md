@@ -154,17 +154,28 @@ Ausgangspunkt für künftige Iterationen.
     einer Antwort kein neuer Start-Ton mehr kommt. Offen bleibt der Fall
     "abgeschickt, aber OpenClaw liefert keine Antwort" (`[Output] skipped`):
     aktuell tonlos, Kandidat wäre der Fehlerton.
-20. Bei totaler Stille greift der Stille-Timeout nicht, weil er erkannte
-    Sprache voraussetzt (`speech_started && silence_ms >= …`) - die
-    Aufnahme läuft dann bis `max_recording_seconds`, also bis zu 60
-    Sekunden. Vor der Korrektur aus Punkt 1 fiel das nie auf, weil der mit
-    aufgenommene Start-Ton `speech_started` immer gesetzt hat. Damit das
-    Ausbleiben des Absende-Tons (Punkt 19) zeitnah als Signal taugt, sollte
-    die Uhr auch ohne erkannte Sprache ablaufen dürfen. Naheliegend: die
-    Bedingung `speech_started &&` streichen und die Zeit bis zum ersten
-    Sprechen von der Pause nach dem Sprechen entkoppeln (zwei Werte statt
-    einem) - dann lässt sich die Pause nach dem Sprechen deutlich kürzer
-    stellen, ohne Zögern am Anfang zu bestrafen. Noch nicht entschieden.
+20. ~~Bei totaler Stille greift der Stille-Timeout nicht, weil er erkannte
+    Sprache voraussetzt - die Aufnahme lief dann bis
+    `max_recording_seconds`, also bis zu 60 Sekunden.~~ **Umgesetzt, mit
+    einer Zahl statt zweien:** Die Bedingung `speech_started &&` ist
+    gestrichen. Es gibt jetzt genau eine Uhr, die ab dem ersten Frame
+    läuft und von jedem Sprach-Frame zurückgesetzt wird; Sprechen
+    verzögert das Ende nur, statt einen zweiten Weg aufzumachen. „Niemand
+    hat gesprochen" und „jemand hat aufgehört zu sprechen" enden damit
+    über denselben Code nach derselben Zeit. `max_recording_seconds` ist
+    dadurch keine Sprachlängenbegrenzung mehr, sondern nur noch ein
+    Sicherheitsnetz gegen unbegrenztes Puffer-Wachstum bei dauerhaftem
+    Raumgeräusch (Standard 300 s, `0` = aus). Der zweite Wert für „Zeit
+    bis zum ersten Sprechen" wurde bewusst *nicht* eingeführt - eine Zahl
+    ist einfacher, und ob die 4 s als Pause nach dem Sprechen zu träge
+    sind, zeigt erst der Praxistest.
+21. ~~Erste Runde und Folgerunden sollen garantiert denselben Code
+    benutzen.~~ **Umgesetzt:** Eine Runde ist jetzt genau eine Funktion
+    (`run_round`), die Aufnahme, Transkription, OpenClaw-Aufruf und
+    Sprachausgabe kapselt und ein `RoundOutcome` zurückgibt. Wake-Word und
+    Folgerunde unterscheiden sich nur noch darin, wer sie aufruft. Damit
+    ist die Gleichheit strukturell erzwungen statt zufällig - und die
+    erste Runde taugt beim Debuggen als Referenz für alle weiteren.
 
 **Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und

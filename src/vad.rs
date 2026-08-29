@@ -62,11 +62,19 @@ impl SilenceTracker {
             }
         }
 
-        if self.elapsed_ms >= self.max_recording_ms {
+        // Sicherheitsnetz gegen unbegrenztes Wachsen des Aufnahmepuffers, wenn
+        // die Umgebung dauerhaft über dem Schwellwert liegt (laufender
+        // Fernseher o. Ä.) und die Stille-Uhr deshalb nie abläuft. `0` schaltet
+        // es ab. Als Längenbegrenzung für Sprache ist es nicht gedacht.
+        if self.max_recording_ms > 0 && self.elapsed_ms >= self.max_recording_ms {
             return VadDecision::StopMaxDuration;
         }
 
-        if self.speech_started && self.silence_ms >= self.silence_timeout_ms {
+        // Die Stille-Uhr gilt ab dem ersten Frame, nicht erst ab erkannter
+        // Sprache: "niemand hat etwas gesagt" endet damit über denselben Weg
+        // und nach derselben Zeit wie "jemand hat aufgehört zu sprechen".
+        // Sprechen verzögert das Ende nur, indem es die Uhr zurücksetzt.
+        if self.silence_ms >= self.silence_timeout_ms {
             return VadDecision::StopSilence;
         }
 
@@ -137,12 +145,59 @@ mod tests {
         assert_eq!(last, VadDecision::StopSilence);
     }
 
+    /// Der Gegenpart zu `stops_after_silence_timeout_following_speech`: Ohne
+    /// jede Sprache endet die Aufnahme über denselben Weg und nach derselben
+    /// Zeit. Früher lief sie stattdessen bis `max_recording_seconds`.
     #[test]
-    fn does_not_stop_on_silence_before_speech_started() {
+    fn stops_after_the_same_timeout_when_nobody_ever_spoke() {
         let mut t = SilenceTracker::new(&cfg());
-        // 500 * 30ms = 15000ms, bleibt unter max_recording_seconds (60s)
-        for _ in 0..500 {
-            assert_eq!(t.push_frame(0.0, 30), VadDecision::Continue);
+        let mut last = VadDecision::Continue;
+        let mut elapsed_ms = 0;
+        for _ in 0..(4000 / 30 + 2) {
+            last = t.push_frame(QUIET, 30);
+            if last != VadDecision::Continue {
+                break;
+            }
+            elapsed_ms += 30;
+        }
+        assert_eq!(last, VadDecision::StopSilence);
+        assert!(
+            (4000 - 60..=4000).contains(&elapsed_ms),
+            "sollte nach ~silence_timeout_ms enden, nicht erst nach max_recording_seconds - war {elapsed_ms} ms"
+        );
+        assert!(
+            !t.speech_started(),
+            "reine Stille darf das Sprach-Gate nicht öffnen"
+        );
+    }
+
+    #[test]
+    fn speech_only_postpones_the_same_timeout() {
+        let mut t = SilenceTracker::new(&cfg());
+        // Kurz vor Ablauf der Uhr sprechen: das verlängert die Aufnahme,
+        // beendet sie aber nicht auf einem anderen Weg.
+        for _ in 0..130 {
+            assert_eq!(t.push_frame(QUIET, 30), VadDecision::Continue);
+        }
+        assert_eq!(t.push_frame(LOUD, 30), VadDecision::Continue);
+        for _ in 0..130 {
+            assert_eq!(
+                t.push_frame(QUIET, 30),
+                VadDecision::Continue,
+                "ein einzelnes lautes Frame muss die Uhr komplett zurücksetzen"
+            );
+        }
+    }
+
+    #[test]
+    fn max_recording_seconds_zero_disables_the_safety_net() {
+        let mut c = cfg();
+        c.max_recording_seconds = 0;
+        c.silence_timeout_ms = 1_000_000; // damit nur der Deckel greifen könnte
+        let mut t = SilenceTracker::new(&c);
+        // 20.000 Frames = 600 s, weit über jedem früheren Deckel
+        for _ in 0..20_000 {
+            assert_eq!(t.push_frame(LOUD, 30), VadDecision::Continue);
         }
     }
 

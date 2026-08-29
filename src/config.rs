@@ -50,7 +50,14 @@ impl Default for WakeWordConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct VadConfig {
+    /// Stille, nach der die Aufnahme endet - gilt ab dem ersten Frame, also
+    /// auch dann, wenn nie jemand gesprochen hat. Sprechen setzt die Uhr
+    /// zurück und verzögert das Ende dadurch.
     pub silence_timeout_ms: u64,
+    /// Sicherheitsnetz gegen unbegrenztes Wachsen des Aufnahmepuffers, falls
+    /// die Umgebung dauerhaft über `silence_rms_threshold` liegt und die
+    /// Stille-Uhr deshalb nie abläuft. Bewusst hoch angesetzt: Es ist keine
+    /// Längenbegrenzung für Sprache. `0` schaltet es ab.
     pub max_recording_seconds: u64,
     pub silence_rms_threshold: f32,
     pub min_speech_ms: u64,
@@ -66,7 +73,7 @@ impl Default for VadConfig {
     fn default() -> Self {
         Self {
             silence_timeout_ms: 4000,
-            max_recording_seconds: 60,
+            max_recording_seconds: 300,
             silence_rms_threshold: 0.02,
             min_speech_ms: 300,
             speech_gap_ms: 200,
@@ -343,7 +350,9 @@ mod tests {
     fn defaults_match_spec() {
         let cfg = Config::default();
         assert_eq!(cfg.vad.silence_timeout_ms, 4000);
-        assert_eq!(cfg.vad.max_recording_seconds, 60);
+        // Sicherheitsnetz, keine Sprachlängenbegrenzung - deshalb bewusst
+        // weit über jeder realistischen Äußerung.
+        assert_eq!(cfg.vad.max_recording_seconds, 300);
         assert_eq!(cfg.whisper.language, "de");
         assert_eq!(cfg.tts.voice, "de_DE-thorsten-high");
         assert!(cfg

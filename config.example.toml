@@ -56,11 +56,18 @@ ignored_patterns = [
 ]
 
 [vad]
-# Stille-Timeout: Aufnahme endet, nachdem nach erkannter Sprache diese
-# Zeit lang RMS-Energie unter dem Schwellwert lag.
+# Stille-Timeout: Die Aufnahme endet, wenn so lange am Stück RMS-Energie
+# unter dem Schwellwert lag. Gilt ab dem ersten Frame - also auch dann,
+# wenn nie jemand gesprochen hat. Sprechen setzt die Uhr zurück und
+# verzögert das Ende dadurch. Dieser eine Wert ist damit sowohl die Zeit,
+# die man zum Anfangen hat, als auch die Pause, die eine Äußerung beenden
+# darf.
 silence_timeout_ms = 4000
-# Harte Obergrenze für eine einzelne Aufnahme.
-max_recording_seconds = 60
+# Sicherheitsnetz, KEINE Längenbegrenzung für Sprache: Liegt die Umgebung
+# dauerhaft über silence_rms_threshold (laufender Fernseher o. Ä.), läuft
+# die Stille-Uhr nie ab und der Aufnahmepuffer würde unbegrenzt wachsen.
+# Deshalb bewusst weit über jeder realistischen Äußerung. 0 = ganz aus.
+max_recording_seconds = 300
 # RMS-Schwellwert (0.0-1.0) für "Sprache erkannt". Ggf. je nach Mikrofon/
 # Raum anpassen.
 silence_rms_threshold = 0.02

@@ -185,8 +185,8 @@ async fn run_cycle_inner(
     // Solange eine Runde tatsächlich eine Antwort hervorbringt, bleibt der
     // Kanal für eine direkte Folgeeingabe offen - ohne dass das Wake-Word
     // erneut gesagt werden muss. Erst eine Runde ohne Sprache/Antwort
-    // schließt den Kanal wieder (mit Ton als Signal, siehe unten), spätestens
-    // aber `conversation.max_followup_turns` Folgerunden nach dem Wake-Word:
+    // schließt den Kanal wieder, spätestens aber
+    // `conversation.max_followup_turns` Folgerunden nach dem Wake-Word:
     // sonst können Fremdgeräusche im Raum (z. B. ein laufender Fernseher) den
     // Kanal beliebig lange offen halten.
     let mut followup_turns: u32 = 0;
@@ -197,136 +197,14 @@ async fn run_cycle_inner(
             return Ok(());
         }
 
-        sm.transition(State::Recording)?;
-        let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
-        let speech_detected = if cli.dry_run {
-            let source = cli
-                .dry_run_file
-                .clone()
-                .context("Im Dry-Run wird eine Beispieldatei benötigt (--dry-run-file)")?;
-            tokio::fs::copy(&source, &raw_wav).await.with_context(|| {
-                format!("Kann Beispieldatei nicht kopieren: {}", source.display())
-            })?;
-            info!(file = %source.display(), "[dry-run] verwende Beispieldatei als Aufnahme");
-            // Dry-Run testet bewusst den vollen Pfad inkl. Whisper, auch wenn
-            // die Beispieldatei nur Stille enthält.
-            true
-        } else {
-            record_until_silence(cfg, &raw_wav).await?
-        };
-
-        sm.transition(State::Transcribing)?;
-        let transcript = if speech_detected {
-            let normalized_wav = tmp_dir.join("normalized.wav");
-            transcribe::normalize_audio(
-                &cfg.general,
-                &raw_wav,
-                &normalized_wav,
-                cfg.whisper.timeout_secs,
-            )
-            .await?;
-            // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
-            // unabhängig davon, was mit der Transkription/Antwort danach passiert.
-            if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
-                warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
-            }
-
-            let t = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
-
-            // Normalisierte Aufnahme wird nach der Transkription nicht mehr
-            // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
-            if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
-                warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
-            }
-            t
-        } else {
-            // VAD hat während der gesamten Aufnahme keine Sprache erkannt
-            // (nur Stille/Hintergrundrauschen) - Whisper wird erst gar nicht
-            // aufgerufen, damit es aus nicht vorhandener Sprache nichts
-            // heraushalluzinieren kann.
-            info!("Keine Sprache erkannt - überspringe Normalisierung und Transkription");
-            if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
-                warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
-            }
-            String::new()
-        };
-        info!(%transcript, "Transkription abgeschlossen");
-
-        // Whisper macht aus TV-/Hintergrundton gerne Abspann-Halluzinationen
-        // ("Untertitelung des ZDF, ..."). Die zählen nicht als Eingabe -
-        // sonst antwortet der Agent auf den Fernseher und hält den Kanal
-        // dadurch offen.
-        let transcript = match transcript_filter::matching_pattern(
-            &cfg.transcript_filter.ignored_patterns,
-            &transcript,
-        ) {
-            Some(pattern) => {
-                warn!(
-                    %transcript,
-                    %pattern,
-                    "Transkript als Störgeräusch/Halluzination verworfen"
-                );
-                transcript_log::log_input_ignored(&cfg.transcription_log, &transcript).await;
-                String::new()
-            }
-            None => {
-                transcript_log::log_input(&cfg.transcription_log, &transcript).await;
-                transcript
-            }
-        };
-
-        sm.transition(State::SendingToOpenClaw)?;
-        let response = if transcript.trim().is_empty() {
-            warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
-            String::new()
-        } else {
-            match openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await {
-                Ok(r) => r,
-                Err(e) => {
-                    transcript_log::log_output(
-                        &cfg.transcription_log,
-                        transcript_log::OutputOutcome::Error,
-                    )
-                    .await;
-                    return Err(e);
-                }
-            }
-        };
-
-        sm.transition(State::Speaking)?;
-        if response.trim().is_empty() {
-            info!("Keine Antwort von OpenClaw - keine Sprachausgabe");
-            transcript_log::log_output(
-                &cfg.transcription_log,
-                transcript_log::OutputOutcome::Skipped,
-            )
-            .await;
-            // Bewusst ohne eigenen Ton: Wurde nichts erkannt, ist bereits der
-            // Absende-Ton ausgeblieben - ein zusätzlicher, gleich klingender
-            // Ton würde nur verwirren.
+        // Hier läuft für jede Runde exakt dieselbe Funktion - egal ob sie vom
+        // Wake-Word oder von der vorigen Runde ausgelöst wurde. Der einzige
+        // Unterschied zwischen "erste Runde" und "Folgerunde" ist der
+        // Auslöser hier drumherum, nicht ihr Ablauf.
+        if run_round(cfg, cli, sm, tmp_dir).await? == RoundOutcome::Closed {
             sm.transition(State::Idle)?;
             return Ok(());
         }
-
-        // Wake-Word-Erkennung läuft nur im Zustand LISTENING_FOR_WAKEWORD und
-        // wird hier bewusst nicht gestartet, damit die eigene Ausgabe keine
-        // neue Wake-Word-Erkennung auslöst. Nach dem Vorlesen wird aber
-        // direkt weiter aufgenommen (record_until_silence markiert Start/
-        // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
-        // erneutes Wake-Word möglich ist.
-        if let Err(e) = tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await {
-            transcript_log::log_output(
-                &cfg.transcription_log,
-                transcript_log::OutputOutcome::Error,
-            )
-            .await;
-            return Err(e);
-        }
-        transcript_log::log_output(
-            &cfg.transcription_log,
-            transcript_log::OutputOutcome::Success(&response),
-        )
-        .await;
 
         if cli.dry_run {
             // Im Dry-Run würde dieselbe --dry-run-file bei erkannter
@@ -341,13 +219,166 @@ async fn run_cycle_inner(
                 max_followup_turns = cfg.conversation.max_followup_turns,
                 "Maximale Zahl an Folgeeingaben erreicht - schließe den Kanal"
             );
-            // Ebenfalls ohne eigenen Ton: Dass der Kanal zu ist, hört man
+            // Bewusst ohne eigenen Ton: Dass der Kanal zu ist, hört man
             // daran, dass nach der Antwort kein Start-Ton mehr kommt.
             sm.transition(State::Idle)?;
             return Ok(());
         }
         followup_turns += 1;
     }
+}
+
+/// Ergebnis einer Runde - entscheidet, ob der Kanal offen bleiben darf.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundOutcome {
+    /// Eine Antwort wurde vorgelesen; eine Folgeeingabe ist möglich.
+    Answered,
+    /// Nichts erkannt oder keine Antwort - der Kanal wird geschlossen.
+    Closed,
+}
+
+/// Eine vollständige Gesprächsrunde: Aufnahme -> Transkription -> OpenClaw
+/// -> Sprachausgabe.
+///
+/// Bewusst *eine* Funktion für beide Auslöser (Wake-Word und Folgerunde).
+/// Im Ablauf einer Runde gibt es keinen Unterschied zwischen der ersten und
+/// jeder weiteren - und durch diesen Zuschnitt kann auch keiner entstehen.
+/// Praktischer Nebeneffekt: Beim Debuggen taugt die erste Runde als Referenz
+/// für alle folgenden.
+async fn run_round(
+    cfg: &Config,
+    cli: &Cli,
+    sm: &mut StateMachine,
+    tmp_dir: &Path,
+) -> Result<RoundOutcome> {
+    sm.transition(State::Recording)?;
+    let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
+    let speech_detected = if cli.dry_run {
+        let source = cli
+            .dry_run_file
+            .clone()
+            .context("Im Dry-Run wird eine Beispieldatei benötigt (--dry-run-file)")?;
+        tokio::fs::copy(&source, &raw_wav)
+            .await
+            .with_context(|| format!("Kann Beispieldatei nicht kopieren: {}", source.display()))?;
+        info!(file = %source.display(), "[dry-run] verwende Beispieldatei als Aufnahme");
+        // Dry-Run testet bewusst den vollen Pfad inkl. Whisper, auch wenn
+        // die Beispieldatei nur Stille enthält.
+        true
+    } else {
+        record_until_silence(cfg, &raw_wav).await?
+    };
+
+    sm.transition(State::Transcribing)?;
+    let transcript = if speech_detected {
+        let normalized_wav = tmp_dir.join("normalized.wav");
+        transcribe::normalize_audio(
+            &cfg.general,
+            &raw_wav,
+            &normalized_wav,
+            cfg.whisper.timeout_secs,
+        )
+        .await?;
+        // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
+        // unabhängig davon, was mit der Transkription/Antwort danach passiert.
+        if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
+            warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
+        }
+
+        let t = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
+
+        // Normalisierte Aufnahme wird nach der Transkription nicht mehr
+        // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
+        if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
+            warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
+        }
+        t
+    } else {
+        // VAD hat während der gesamten Aufnahme keine Sprache erkannt
+        // (nur Stille/Hintergrundrauschen) - Whisper wird erst gar nicht
+        // aufgerufen, damit es aus nicht vorhandener Sprache nichts
+        // heraushalluzinieren kann.
+        info!("Keine Sprache erkannt - überspringe Normalisierung und Transkription");
+        if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
+            warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
+        }
+        String::new()
+    };
+    info!(%transcript, "Transkription abgeschlossen");
+
+    // Whisper macht aus TV-/Hintergrundton gerne Abspann-Halluzinationen
+    // ("Untertitelung des ZDF, ..."). Die zählen nicht als Eingabe -
+    // sonst antwortet der Agent auf den Fernseher und hält den Kanal
+    // dadurch offen.
+    let transcript = match transcript_filter::matching_pattern(
+        &cfg.transcript_filter.ignored_patterns,
+        &transcript,
+    ) {
+        Some(pattern) => {
+            warn!(
+                %transcript,
+                %pattern,
+                "Transkript als Störgeräusch/Halluzination verworfen"
+            );
+            transcript_log::log_input_ignored(&cfg.transcription_log, &transcript).await;
+            String::new()
+        }
+        None => {
+            transcript_log::log_input(&cfg.transcription_log, &transcript).await;
+            transcript
+        }
+    };
+
+    sm.transition(State::SendingToOpenClaw)?;
+    let response = if transcript.trim().is_empty() {
+        warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
+        String::new()
+    } else {
+        match openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await {
+            Ok(r) => r,
+            Err(e) => {
+                transcript_log::log_output(
+                    &cfg.transcription_log,
+                    transcript_log::OutputOutcome::Error,
+                )
+                .await;
+                return Err(e);
+            }
+        }
+    };
+
+    sm.transition(State::Speaking)?;
+    if response.trim().is_empty() {
+        info!("Keine Antwort von OpenClaw - keine Sprachausgabe");
+        transcript_log::log_output(
+            &cfg.transcription_log,
+            transcript_log::OutputOutcome::Skipped,
+        )
+        .await;
+        // Bewusst ohne eigenen Ton: Wurde nichts erkannt, ist bereits der
+        // Absende-Ton ausgeblieben - ein zusätzlicher, gleich klingender
+        // Ton würde nur verwirren.
+        return Ok(RoundOutcome::Closed);
+    }
+
+    // Wake-Word-Erkennung läuft nur im Zustand LISTENING_FOR_WAKEWORD und
+    // wird hier bewusst nicht gestartet, damit die eigene Ausgabe keine
+    // neue Wake-Word-Erkennung auslöst. Nach dem Vorlesen wird aber
+    // direkt weiter aufgenommen (record_until_silence markiert Start/
+    // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
+    // erneutes Wake-Word möglich ist.
+    if let Err(e) = tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await {
+        transcript_log::log_output(&cfg.transcription_log, transcript_log::OutputOutcome::Error)
+            .await;
+        return Err(e);
+    }
+    transcript_log::log_output(
+        &cfg.transcription_log,
+        transcript_log::OutputOutcome::Success(&response),
+    )
+    .await;
+
+    Ok(RoundOutcome::Answered)
 }
 
 /// Nimmt bis Stille/Timeout auf und schreibt das Ergebnis nach `out_path`.
@@ -378,14 +409,16 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
         * capture.channels as usize)
         .max(1);
 
-    // Obergrenze vorab bekannt (max_recording_seconds) - Kapazität einmal
-    // reservieren statt den Puffer währenddessen mehrfach wachsen und dabei
-    // seinen kompletten Inhalt umkopieren zu lassen (bei 60s/48kHz/1ch sonst
-    // bis zu mehrere MB unnötig kopierter Daten durch Reallocation).
-    let expected_max_samples = (capture.sample_rate as u64
-        * cfg.vad.max_recording_seconds
-        * capture.channels as u64) as usize;
-    let mut samples: Vec<f32> = Vec::with_capacity(expected_max_samples);
+    // Kapazität für eine typische Äußerung vorab reservieren, damit der Puffer
+    // im Normalfall nicht mehrfach wachsen und dabei seinen kompletten Inhalt
+    // umkopieren muss. Bewusst *nicht* an `max_recording_seconds` gekoppelt:
+    // das ist inzwischen ein hoch angesetztes Sicherheitsnetz (oder ganz aus),
+    // danach würde hier bei jeder Aufnahme dreistellig MB reserviert. Längere
+    // Aufnahmen lässt der Vec regulär wachsen.
+    const PREALLOC_SECONDS: u64 = 15;
+    let prealloc_samples =
+        (capture.sample_rate as u64 * PREALLOC_SECONDS * capture.channels as u64) as usize;
+    let mut samples: Vec<f32> = Vec::with_capacity(prealloc_samples);
     let mut frame_buf: Vec<f32> = Vec::with_capacity(frame_samples * 2);
 
     'outer: loop {
