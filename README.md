@@ -118,11 +118,12 @@ cargo build --release
 
 Die Binary liegt danach unter `target/release/openclaw-voicebridge`.
 
-> **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
-> und `cargo test` (66/66 Tests grün) wurden auf Linux verifiziert. Das
+> **Hinweis:** Entwickelt und geprüft wird meist unter Linux; das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
+> Wer am Code arbeitet, findet Build-Voraussetzungen, Teststrategie und die
+> Invarianten des Projekts in [AGENTS.md](AGENTS.md).
 
 ## Release
 
@@ -513,28 +514,10 @@ Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
 cargo test
 ```
 
-Abgedeckt sind u. a.:
-
-- Zustandsmaschine: erlaubte/verbotene Übergänge, vollständiger Zyklus,
-  Recovery nach `IDLE` aus jedem Zwischenzustand.
-- VAD-Timeout-Logik: Fortsetzen bei Sprache, Stopp nach Stille-Timeout -
-  mit und ohne jemals erkannte Sprache, über denselben Weg und nach
-  derselben Zeit -, Sprechen verzögert das Ende nur, Stopp beim
-  Sicherheitsnetz, und `max_recording_seconds = 0` schaltet dieses ab.
-- VAD-Sprach-Erkennung: verstreute laute Einzelframes öffnen das Gate
-  **nicht** (Regression aus dem Feldtest), kurze Silbenpausen setzen einen
-  laufenden Sprach-Abschnitt nicht zurück, eine lange Pause schon, und der
-  Stille-Timeout greift auch nach einem zurückgesetzten Abschnitt.
-- CLI-Argument-Konstruktion für `whisper-cli`, `ffmpeg`, den
-  OpenClaw-Adapter und `piper` (inkl. `extra_args`, explizitem
-  Zielkanal, Modell- vs. Stimmen-Auswahl bei Piper).
-- Config-Defaults und -Validierung (u. a. Ablehnung eines leeren
-  `openclaw.target_channel`), Ableitung des Sperrdatei-Pfads.
-- CLI-Flag-Parsing (`--dry-run`, `--dry-run-file`, Defaults).
-- Einzelinstanz-Sperre: Belegen, Ablehnen einer zweiten Sperre inkl. PID in
-  der Meldung, erneutes Belegen nach Freigabe.
-- Transkript-Filter: Normalisierung, Treffer auf den Halluzinationen aus dem
-  Feldtest, keine Treffer auf echten Eingaben, leere Muster/Transkripte.
+Läuft ohne installiertes ffmpeg/whisper/Piper/OpenClaw durch - ein
+Integrationstest spielt die komplette Runde gegen Stub-Programme durch.
+Was im Einzelnen abgedeckt ist und wie man Änderungen an der Prozesskette
+prüft, steht in [AGENTS.md](AGENTS.md#tests).
 
 ## Bekannte Einschränkungen / Annahmen
 
@@ -549,3 +532,6 @@ Abgedeckt sind u. a.:
   auf dem tatsächlichen macOS-Zielsystem `cargo build --release` und
   `cargo test` erneut ausführen sowie den `--dry-run`-Modus mit den echten
   whisper-cli/Piper/OpenClaw-Binaries durchspielen.
+- Was noch offen ist und warum, steht durchgängig in `ideas.md`; die
+  Invarianten, die dabei nicht gebrochen werden dürfen, in
+  [AGENTS.md](AGENTS.md#invarianten).

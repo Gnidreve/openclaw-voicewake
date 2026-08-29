@@ -1,0 +1,196 @@
+# AGENTS.md
+
+Orientierung für alle, die **an** diesem Projekt arbeiten - Menschen wie
+Agenten. Die [README](README.md) beschreibt, wie man den Dienst *benutzt*;
+hier steht, was man wissen muss, bevor man ihn *ändert*.
+
+## In einem Absatz
+
+`openclaw-voicebridge` ist ein lokaler macOS-Sprachdienst: Wake-Word →
+Mikrofon → VAD → whisper.cpp → OpenClaw-CLI → Piper-TTS → Lautsprecher.
+Alles läuft über lokale Prozesse, die per `config.toml` konfiguriert
+werden. Der Rust-Teil kümmert sich um Audio, Zeit und Zustand; *was* die
+externen Werkzeuge können und wie sie aufgerufen werden, weiß er
+absichtlich nicht.
+
+## Arbeiten am Code
+
+```bash
+cargo test              # alles, inkl. Pipeline-Test gegen Stubs
+cargo clippy --all-targets
+cargo fmt
+cargo build --release
+```
+
+Alle drei müssen sauber durchlaufen, bevor etwas gepusht wird - clippy
+ohne eine einzige Warnung.
+
+Unter Linux braucht `cpal` die ALSA-Header, sonst bricht schon der Build ab:
+
+```bash
+apt-get install -y libasound2-dev
+```
+
+**Sprache:** Code-Kommentare, Doku und Konfigurationsbeispiele auf Deutsch;
+Commit-Nachrichten und PR-Titel auf Englisch. Kommentare erklären das
+*Warum*, nicht das *Was* - besonders dort, wo eine naheliegende Variante
+absichtlich verworfen wurde.
+
+## Was sich hier nicht prüfen lässt - und was trotzdem
+
+Die Zielplattform ist macOS auf Apple Silicon. CoreAudio-Verhalten,
+Mikrofonrechte, das echte whisper.cpp, Piper und OpenClaw lassen sich nur
+dort testen. Entwickelt und geprüft wird trotzdem meist unter Linux.
+
+Damit das kein blinder Fleck bleibt, gibt es zwei Integrationstests:
+
+| Test | Braucht | Läuft bei `cargo test` |
+|---|---|---|
+| `tests/pipeline_with_stubs.rs` | nur `/bin/sh` | **ja** |
+| `tests/dry_run.rs` | echtes ffmpeg, whisper-cli + Modell, piper, openclaw | nein (`#[ignore]`) |
+
+`pipeline_with_stubs` legt Stub-Programme in einem Temp-Verzeichnis an, die
+sich wie die echten verhalten und **mit Exit-Code 3 abbrechen, wenn die
+Aufrufform nicht stimmt** - Piper muss als venv-Python mit `-m piper`
+zuerst aufgerufen werden, OpenClaw mit Subkommando `agent` und dem
+richtigen `--session-key`. Dann läuft eine vollständige Runde durch:
+Transkript → Umschlag → JSON-Antwort → Sprachausgabe.
+
+**Das ist das Werkzeug der Wahl für eine Änderung an der Prozesskette.**
+Wer eine solche Änderung macht, sollte den Test einmal absichtlich brechen
+und sehen, dass er rot wird - ein Test, der immer grün ist, prüft nichts.
+
+Für alles Weitere: `--dry-run --dry-run-file <wav> --once` ersetzt nur die
+Mikrofonaufnahme, der Rest läuft real.
+
+## Module
+
+| Datei | Verantwortung |
+|---|---|
+| `main.rs` | Zustandsmaschine, Zyklus- und Rundenablauf, Aufnahme |
+| `state.rs` | erlaubte Zustandsübergänge |
+| `audio.rs` | CoreAudio-Aufnahme, WAV schreiben |
+| `vad.rs` | Stille-/Sprach-Erkennung (reine Logik, gut testbar) |
+| `transcribe.rs` | ffmpeg-Normalisierung, whisper-cli |
+| `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
+| `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
+| `tts.rs` | Piper-Aufruf, Wiedergabe |
+| `sound.rs` | Bestätigungs- und Fehlerton |
+| `instance_lock.rs` | Einzelinstanz-Sperre |
+| `transcript_log.rs` | chat-artiges Diagnose-Log |
+| `config.rs` | Konfiguration und Startvalidierung |
+
+Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
+Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
+
+## Invarianten
+
+Diese Regeln stammen aus Fehlern, die im Feldtest wirklich passiert sind.
+Wer eine davon aufweicht, holt den jeweiligen Bug zurück.
+
+**Der Start-Ton läuft, bevor das Mikrofon aufgeht.** Bei einem Speakerphone
+landete er sonst in der eigenen Aufnahme, war lauter und länger als
+`min_speech_ms` - und setzte damit bei *jeder* Aufnahme "Sprache erkannt".
+Der Whisper-Skip für stille Aufnahmen konnte nie greifen, Whisper
+halluzinierte aus Stille Text, der als Eingabe den Kanal offen hielt. Der
+Ende-Ton läuft entsprechend erst nach dem Schließen.
+
+**Es gibt genau eine Uhr.** `silence_timeout_ms` läuft ab dem ersten Frame,
+Sprechen setzt sie nur zurück. "Niemand hat gesprochen" und "jemand hat
+aufgehört" enden über denselben Weg. Kein zweiter Ausgang, kein
+`speech_started`-Vorbehalt. `max_recording_seconds` ist **keine**
+Sprachlängenbegrenzung, sondern nur ein Sicherheitsnetz gegen unbegrenztes
+Puffer-Wachstum bei Dauergeräusch.
+
+**`min_speech_ms` meint zusammenhängende Sprache.** Der Zähler wird nach
+`speech_gap_ms` Stille zurückgesetzt. Ohne das addieren sich verstreute
+laute Frames über die ganze Aufnahme zu "Sprache".
+
+**Nur eine Instanz.** Der `flock`-Pfad ist bewusst nicht konfigurierbar und
+hängt nicht an `general.temp_dir` - jede Konfigurierbarkeit wäre ein Weg,
+die Sperre mit zwei Konfigurationen auszuhebeln.
+
+**Der Zielkanal muss das CLI erreichen.** `{channel}` ist in
+`openclaw.args` Pflicht. Vorher setzte ein Adapter-Skript die Session fest
+und `target_channel` steuerte nichts - die Validierung bewachte einen Wert
+ohne Wirkung.
+
+**Der Transkript-Filter ist das letzte Netz, nicht die tragende Schicht.**
+Die Musterliste nicht ausbauen: Sie fängt bekannte Whisper-Halluzinationen
+ab, aber die Ursache gehört davor behoben. `Vielen Dank.` gehört *nicht*
+hinein - das ist eine legitime Eingabe.
+
+**Keine Audiodateien bleiben liegen.** Roh- und normalisierte Aufnahme
+werden direkt nach Gebrauch gelöscht, nicht erst am Zyklusende.
+
+**Töne bedeuten etwas.** Glass beim Start = "sprich"; Glass am Ende =
+"erkannt, wird gesendet"; kein Ton am Ende = "nichts erkannt, nichts
+gesendet"; Basso = Fehler. Keine weiteren, gleich klingenden Töne
+hinzufügen - das Ausbleiben eines Tons ist selbst ein Signal.
+
+## Konfiguration
+
+**Alles, was ohne Neukompilierung änderbar ist und je nach Setup andere
+Werte hat, gehört in die `config.toml`.** Das gilt ausdrücklich auch für
+Argumentlisten und Prompt-Texte, nicht nur für Pfade.
+
+Deshalb enthalten `tts.args` und `openclaw.args` die *vollständige*
+Argumentliste mit Platzhaltern statt fester Flags plus `extra_args`: Wie
+Piper oder OpenClaw aufgerufen werden wollen, hängt von der Installation ab
+(System-Binary, Python-Modul im venv, anderer Flag-Name für den Zielkanal).
+Feste Reihenfolgen erzwangen früher Wrapper-Skripte, die nichts weiter
+taten als Argumente umzusortieren.
+
+Neue Platzhalter, die weggelassen etwas still Falsches bewirken würden,
+gehören in `Config::validate` - lieber ein klarer Abbruch beim Start als
+ein Fehler beim ersten Sprechversuch.
+
+## Tests
+
+Abgedeckt sind unter anderem: Zustandsübergänge und Recovery, die
+VAD-Logik in beide Richtungen, der Transkript-Filter, die Einzelinstanz-
+Sperre, die Argumentkonstruktion für whisper/ffmpeg/OpenClaw/Piper, die
+Antwort-Extraktion aus JSON, Config-Defaults und alle Startprüfungen sowie
+ein Test, der `config.example.toml` gegen die echten Structs lädt.
+
+Zwei Konventionen:
+
+* Ein Test, der einen Feldfehler festhält, sagt das in seinem Namen oder
+  Doc-Kommentar (`reproduces_the_venv_invocation_from_the_shell_adapter`,
+  `scattered_loud_frames_never_count_as_speech`).
+* Ein Test, der eine Aufrufform Argument für Argument festnagelt, ist
+  Absicht: Er schlägt fehl, sobald eine Konfiguration ein früheres Skript
+  nicht mehr ersetzen könnte.
+
+## Release
+
+Die Version in `Cargo.toml` ist die einzige Quelle. Erhöhen und nach `main`
+mergen erzeugt Tag, Release und ZIP; Details im
+[Release-Abschnitt der README](README.md#release). Ein Tag, der nicht zu
+`Cargo.toml` passt, bricht den Workflow ab.
+
+## Offene Punkte
+
+`ideas.md` ist die gepflegte Liste - erledigte Punkte sind durchgestrichen
+und mit dem Ergebnis versehen, offene stehen im Klartext da. Die derzeit
+wichtigsten:
+
+* **Adaptiver RMS-Schwellwert** (Punkt 14): `silence_rms_threshold` ist
+  fix. Liegt die Raumlautstärke dauerhaft darüber - laufender Fernseher -,
+  gilt Geräusch als Sprache. Das ist die Wurzel hinter dem Transkript-Filter.
+* **Whisper-eigenes VAD**: `--vad` mit Silero würde Halluzinationen aus
+  Nicht-Sprache an der Quelle abstellen; über `whisper.extra_args` ohne
+  Rust-Änderung testbar.
+* **`[Output] skipped` ist tonlos** - abgeschickt, aber keine Antwort
+  erhalten, bleibt akustisch unbemerkt.
+* **Wake-Word-Listener als externer Prozess**: Der Neustart pro Zyklus war
+  die Quelle mehrerer Fehler. In Rust wäre es ein einziger
+  Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die Nachbildung der
+  openWakeWord-Vorverarbeitung.
+
+## Was dieses Projekt nicht tut
+
+Es ändert nie selbstständig OpenClaw-Konfiguration, startet nie ein Gateway
+neu und speichert keine Audiodateien dauerhaft. Das
+[Transcription-Log](README.md#transcription-log) ist die bewusste Ausnahme
+und abschaltbar.
