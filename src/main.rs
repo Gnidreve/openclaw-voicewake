@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
     spawn_signal_handler(shutdown.clone());
 
-    info!(dry_run = cli.dry_run, "claw-voice-bridge gestartet");
+    info!(dry_run = cli.dry_run, "openclaw-voicebridge gestartet");
 
     let mut sm = StateMachine::new();
 
@@ -484,7 +484,7 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
 
 fn make_temp_dir(cfg: &Config) -> Result<PathBuf> {
     let base = cfg.general.temp_base();
-    let dir = base.join(format!("claw-voice-bridge-{}", uuid::Uuid::new_v4()));
+    let dir = base.join(format!("openclaw-voicebridge-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).with_context(|| {
         format!(
             "Kann temporäres Verzeichnis nicht anlegen: {}",

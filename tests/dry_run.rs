@@ -64,7 +64,7 @@ fn full_dry_run_cycle_completes_without_panicking() {
     write_sample_wav(&wav_path);
     write_test_config(&config_path);
 
-    let bin = env!("CARGO_BIN_EXE_claw-voice-bridge");
+    let bin = env!("CARGO_BIN_EXE_openclaw-voicebridge");
     let output = Command::new(bin)
         .arg("--config")
         .arg(&config_path)
@@ -84,7 +84,10 @@ fn full_dry_run_cycle_completes_without_panicking() {
 }
 
 fn tempfile_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("claw-voice-bridge-test-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!(
+        "openclaw-voicebridge-test-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

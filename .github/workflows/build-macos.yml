@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       package: ${{ steps.plan.outputs.package }}
+      binary: ${{ steps.plan.outputs.binary }}
       tag: ${{ steps.plan.outputs.tag }}
       mode: ${{ steps.plan.outputs.mode }}
       build: ${{ steps.plan.outputs.build }}
@@ -43,8 +44,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Quelle der Wahrheit für die Version ist Cargo.toml. Alles andere
-          # (Tag, Release, Dateiname) leitet sich davon ab.
+          # Quelle der Wahrheit für Name und Version ist Cargo.toml. Alles
+          # andere (Tag, Release, Archivname, Binary im Archiv) leitet sich
+          # davon ab - hier steht kein Produktname mehr fest verdrahtet.
+          cargo_name="$(grep -m1 '^name' Cargo.toml | cut -d'"' -f2)"
           cargo_version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
 
           case "$EVENT_NAME" in
@@ -95,7 +98,8 @@ jobs:
           fi
 
           {
-            echo "package=openclaw-voicebridge-${version}-macos"
+            echo "package=${cargo_name}-${version}-macos"
+            echo "binary=${cargo_name}"
             echo "tag=v${version}"
             echo "mode=$mode"
             echo "build=$build"
@@ -127,10 +131,11 @@ jobs:
       - name: Package as ZIP
         env:
           STAGE: ${{ needs.plan.outputs.package }}
+          BIN: ${{ needs.plan.outputs.binary }}
         run: |
           set -euo pipefail
           mkdir "$STAGE"
-          cp target/release/claw-voice-bridge "$STAGE/"
+          cp "target/release/$BIN" "$STAGE/"
           cp README.md config.example.toml "$STAGE/"
           ditto -c -k --sequesterRsrc --keepParent "$STAGE" "$STAGE.zip"
 

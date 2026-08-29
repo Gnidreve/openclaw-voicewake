@@ -1,11 +1,11 @@
 [package]
-name = "claw-voice-bridge"
-version = "0.1.0"
+name = "openclaw-voicebridge"
+version = "0.1.4"
 edition = "2021"
 description = "Lokaler macOS-Sprachdienst: Wake-Word -> VAD -> Whisper -> OpenClaw -> Piper TTS"
 
 [[bin]]
-name = "claw-voice-bridge"
+name = "openclaw-voicebridge"
 path = "src/main.rs"
 
 [dependencies]

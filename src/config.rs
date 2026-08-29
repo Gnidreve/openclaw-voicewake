@@ -319,7 +319,7 @@ impl Config {
 
 /// Lokaler Sprachdienst: Wake-Word -> VAD -> Whisper -> OpenClaw -> Piper TTS
 #[derive(Debug, Parser)]
-#[command(name = "claw-voice-bridge")]
+#[command(name = "openclaw-voicebridge")]
 pub struct Cli {
     /// Pfad zur TOML-Konfigurationsdatei
     #[arg(short, long, default_value = "config.toml")]
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn cli_parses_dry_run_flags() {
         let cli = Cli::parse_from([
-            "claw-voice-bridge",
+            "openclaw-voicebridge",
             "--dry-run",
             "--dry-run-file",
             "sample.wav",
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn cli_defaults() {
-        let cli = Cli::parse_from(["claw-voice-bridge"]);
+        let cli = Cli::parse_from(["openclaw-voicebridge"]);
         assert!(!cli.dry_run);
         assert_eq!(cli.config, PathBuf::from("config.toml"));
         assert!(!cli.once);
