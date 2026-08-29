@@ -178,20 +178,33 @@ impl Default for OpenClawConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TtsConfig {
-    pub piper_binary: String,
+    /// Auszuführendes Programm. Muss nicht Piper selbst sein - bei einer
+    /// venv-Installation steht hier das Python des venv, und `-m piper`
+    /// kommt über `args`.
+    pub binary: String,
+    /// Stimmenname, einsetzbar in `args` über `{voice}`. Als eigenes Feld
+    /// gehalten, damit ein Stimmenwechsel eine Zeile bleibt.
     pub voice: String,
-    pub model_path: Option<PathBuf>,
-    pub extra_args: Vec<String>,
+    /// Vollständige Argumentliste - das ist bewusst kein "extra_args" mehr:
+    /// Welche Flags Piper versteht, unterscheidet sich zwischen
+    /// Installationen (venv-Modul, System-Binary, Wrapper), und das kann
+    /// die Bridge nicht erraten. Platzhalter:
+    ///   `{output}` - Pfad der zu erzeugenden WAV-Datei (Pflicht)
+    ///   `{voice}`  - der Wert aus `voice`
+    /// Der zu sprechende Text geht immer über stdin.
+    pub args: Vec<String>,
     pub player_binary: String,
     pub timeout_secs: u64,
 }
 impl Default for TtsConfig {
     fn default() -> Self {
         Self {
-            piper_binary: "piper".to_string(),
+            binary: "piper".to_string(),
             voice: "de_DE-thorsten-high".to_string(),
-            model_path: None,
-            extra_args: vec![],
+            args: ["--model", "{voice}", "--output_file", "{output}"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             player_binary: "afplay".to_string(),
             timeout_secs: 30,
         }
@@ -305,6 +318,21 @@ impl Config {
             anyhow::bail!(
                 "openclaw.target_channel ist nicht gesetzt. Der Zielkanal/Agent muss explizit \
                  konfiguriert werden und wird NICHT automatisch auf die Main-Session gesetzt."
+            );
+        }
+        // Ohne diesen Platzhalter bekäme Piper nie einen Ausgabepfad: Es
+        // entstünde keine WAV-Datei, und der Fehler zeigte sich erst beim
+        // ersten Sprechversuch statt beim Start.
+        if !self
+            .tts
+            .args
+            .iter()
+            .any(|arg| arg.contains(crate::tts::OUTPUT_PLACEHOLDER))
+        {
+            anyhow::bail!(
+                "tts.args enthält keinen {} -Platzhalter. Ohne ihn weiß Piper nicht, \
+                 wohin die Sprachausgabe geschrieben werden soll.",
+                crate::tts::OUTPUT_PLACEHOLDER
             );
         }
         if !dry_run && !self.whisper.model_path.exists() {
@@ -443,6 +471,15 @@ mod tests {
     fn validate_rejects_empty_target_channel() {
         let cfg = Config::default();
         assert!(cfg.validate(true).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_tts_args_without_output_placeholder() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.tts.args = vec!["--model".to_string(), "{voice}".to_string()];
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("{output}"), "{err}");
     }
 
     #[test]

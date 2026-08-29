@@ -8,21 +8,24 @@ use tracing::info;
 
 use crate::config::TtsConfig;
 
-/// Reine Argument-Konstruktion für piper, unabhängig testbar.
+/// Platzhalter für den Pfad der zu erzeugenden WAV-Datei.
+pub const OUTPUT_PLACEHOLDER: &str = "{output}";
+/// Platzhalter für den Stimmennamen aus `tts.voice`.
+pub const VOICE_PLACEHOLDER: &str = "{voice}";
+
+/// Setzt die Platzhalter in `tts.args` ein. Die Argumentliste kommt
+/// vollständig aus der Konfiguration - so lässt sich jede Piper-Variante
+/// ansprechen (System-Binary, Python-Modul im venv, eigener Wrapper), ohne
+/// dass die Bridge deren Flags kennen muss.
 pub fn build_piper_args(cfg: &TtsConfig, out_wav: &Path) -> Vec<String> {
-    let mut args = vec![
-        "--output_file".to_string(),
-        out_wav.to_string_lossy().to_string(),
-    ];
-    if let Some(model) = &cfg.model_path {
-        args.push("--model".to_string());
-        args.push(model.to_string_lossy().to_string());
-    } else {
-        args.push("--voice".to_string());
-        args.push(cfg.voice.clone());
-    }
-    args.extend(cfg.extra_args.clone());
-    args
+    let output = out_wav.to_string_lossy();
+    cfg.args
+        .iter()
+        .map(|arg| {
+            arg.replace(OUTPUT_PLACEHOLDER, &output)
+                .replace(VOICE_PLACEHOLDER, &cfg.voice)
+        })
+        .collect()
 }
 
 /// Synthetisiert Text mit Piper und spielt das Ergebnis über das
@@ -33,7 +36,7 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
 
     info!(voice = %cfg.voice, "Starte Piper-TTS");
 
-    let mut cmd = Command::new(&cfg.piper_binary);
+    let mut cmd = Command::new(&cfg.binary);
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -104,23 +107,78 @@ mod tests {
     }
 
     #[test]
-    fn args_use_voice_when_no_model_path_set() {
+    fn placeholders_are_substituted() {
         let cfg = TtsConfig::default();
         let args = build_piper_args(&cfg, &PathBuf::from("/tmp/out.wav"));
-        assert!(args.contains(&"--voice".to_string()));
-        assert!(args.contains(&"de_DE-thorsten-high".to_string()));
-        assert!(!args.contains(&"--model".to_string()));
+        assert_eq!(
+            args,
+            vec![
+                "--model",
+                "de_DE-thorsten-high",
+                "--output_file",
+                "/tmp/out.wav"
+            ]
+        );
+    }
+
+    /// Bildet den bisherigen piper-adapter.sh exakt nach - den Zweig, der im
+    /// Feld tatsächlich lief (Stimmenname + --data-dir, nicht Modellpfad).
+    /// Schlägt dieser Test fehl, kann die Konfiguration das Skript nicht
+    /// mehr ersetzen.
+    #[test]
+    fn reproduces_the_venv_invocation_from_the_shell_adapter() {
+        let cfg = TtsConfig {
+            binary: "/Users/mac-mini/.openclaw/workspace/state/piper-tts-venv/bin/python3"
+                .to_string(),
+            voice: "de_DE-thorsten-high".to_string(),
+            args: [
+                "-m",
+                "piper",
+                "--data-dir",
+                "/Users/mac-mini/.local/share/piper-voices",
+                "-m",
+                "{voice}",
+                "-f",
+                "{output}",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+            ..Default::default()
+        };
+        let args = build_piper_args(&cfg, &PathBuf::from("/tmp/piper-out-42.wav"));
+        assert_eq!(
+            args,
+            vec![
+                "-m",
+                "piper",
+                "--data-dir",
+                "/Users/mac-mini/.local/share/piper-voices",
+                "-m",
+                "de_DE-thorsten-high",
+                "-f",
+                "/tmp/piper-out-42.wav",
+            ]
+        );
     }
 
     #[test]
-    fn args_use_model_path_when_set() {
+    fn placeholders_also_work_inside_a_combined_argument() {
         let cfg = TtsConfig {
-            model_path: Some(PathBuf::from("/models/thorsten.onnx")),
+            args: vec!["--output-file={output}".to_string()],
             ..Default::default()
         };
         let args = build_piper_args(&cfg, &PathBuf::from("/tmp/out.wav"));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"/models/thorsten.onnx".to_string()));
-        assert!(!args.contains(&"--voice".to_string()));
+        assert_eq!(args, vec!["--output-file=/tmp/out.wav"]);
+    }
+
+    #[test]
+    fn arguments_without_placeholders_are_passed_through_unchanged() {
+        let cfg = TtsConfig {
+            args: vec!["--quiet".to_string(), "{output}".to_string()],
+            ..Default::default()
+        };
+        let args = build_piper_args(&cfg, &PathBuf::from("/tmp/out.wav"));
+        assert_eq!(args, vec!["--quiet", "/tmp/out.wav"]);
     }
 }

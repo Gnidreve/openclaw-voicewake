@@ -264,10 +264,35 @@ irgendeinen Standardkanal zu befüllen. Diese CLI ist bewusst ein
 eigenständiger, austauschbarer Adapter: `openclaw-voicebridge` ändert nie
 selbstständig OpenClaw-Konfiguration und startet nie ein Gateway neu.
 
-### Piper (`tts.piper_binary`)
+### Piper (`tts.binary`)
 
-Aufruf mit `--output_file <wav>` sowie entweder `--model <model_path>`
-(falls gesetzt) oder `--voice <voice>`. Text wird über stdin übergeben.
+Die Argumentliste steht vollständig in `tts.args`; die Bridge setzt nur
+Platzhalter ein und schiebt den zu sprechenden Text über stdin:
+
+| Platzhalter | Bedeutung |
+|---|---|
+| `{output}` | Pfad der zu erzeugenden WAV-Datei - **Pflicht** |
+| `{voice}` | der Wert aus `tts.voice` |
+
+Fehlt `{output}` in `args`, bricht schon der Start mit einer klaren Meldung
+ab, statt beim ersten Sprechversuch zu scheitern.
+
+Der Grund für die vollständige Liste statt fester Flags plus `extra_args`:
+Welche Argumente Piper versteht, hängt von der Installation ab. Als
+System-Binary ist es `piper --model … --output_file …`; liegt Piper als
+Python-Modul in einem venv, muss `-m piper` **vor** allen anderen
+Argumenten stehen, und dann heißen die Flags je nach Aufrufweg auch mal
+`-m`/`-f`/`--data-dir`. Eine fest verdrahtete Reihenfolge kann das nicht
+abbilden - deshalb kommt sie aus der Konfiguration. Für den venv-Fall
+zeigt `tts.binary` entsprechend auf das Python des venv, nicht auf Piper:
+
+```toml
+binary = "/pfad/zum/venv/bin/python3"
+args = ["-m", "piper", "--data-dir", "/pfad/zu/piper-voices",
+        "-m", "{voice}", "-f", "{output}"]
+```
+
+Damit erübrigt sich ein vorgeschaltetes Wrapper-Skript.
 
 ## Bestätigungstöne
 

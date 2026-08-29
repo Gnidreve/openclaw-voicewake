@@ -99,11 +99,31 @@ extra_args = []
 timeout_secs = 30
 
 [tts]
-piper_binary = "piper"
+# Auszuführendes Programm. Muss nicht Piper selbst sein - siehe venv-Beispiel
+# weiter unten.
+binary = "piper"
+# Stimmenname. Eigenes Feld, damit ein Stimmenwechsel eine Zeile bleibt;
+# in `args` über {voice} einsetzbar.
 voice = "de_DE-thorsten-high"
-# Alternativ direkter Modellpfad statt Stimmenname:
-# model_path = "/Users/mac-mini/.local/share/piper/de_DE-thorsten-high.onnx"
-extra_args = []
+# VOLLSTÄNDIGE Argumentliste, kein "extra_args": Welche Flags Piper versteht,
+# hängt von der Installation ab (System-Binary, Python-Modul im venv, eigener
+# Wrapper) - das kann die Bridge nicht erraten. Der zu sprechende Text geht
+# immer über stdin.
+# Platzhalter:
+#   {output}  Pfad der zu erzeugenden WAV-Datei - PFLICHT, sonst bricht der
+#             Start mit einer klaren Meldung ab
+#   {voice}   der Wert aus `voice`
+args = ["--model", "{voice}", "--output_file", "{output}"]
+#
+# Beispiel für Piper als Python-Modul in einem venv (dann zeigt `binary` auf
+# das Python des venv, nicht auf Piper):
+# binary = "/Users/mac-mini/.openclaw/workspace/state/piper-tts-venv/bin/python3"
+# args = [
+#   "-m", "piper",
+#   "--data-dir", "/Users/mac-mini/.local/share/piper-voices",
+#   "-m", "{voice}",
+#   "-f", "{output}",
+# ]
 player_binary = "afplay"
 timeout_secs = 30
 
