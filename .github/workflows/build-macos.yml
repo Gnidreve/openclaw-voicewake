@@ -2,6 +2,8 @@ name: Build macOS Binary
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   release:
@@ -12,7 +14,96 @@ permissions:
   contents: write
 
 jobs:
+  # Entscheidet auf einem günstigen Ubuntu-Runner, ob überhaupt gebaut werden
+  # muss. Ohne diesen Schritt würde jeder Merge nach main einen macOS-Runner
+  # beschäftigen (die zehnfach gewichtet abgerechnet werden), obwohl es meist
+  # nichts zu veröffentlichen gibt.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      package: ${{ steps.plan.outputs.package }}
+      tag: ${{ steps.plan.outputs.tag }}
+      mode: ${{ steps.plan.outputs.mode }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tags werden gebraucht, um zu erkennen, ob die Version aus
+          # Cargo.toml bereits veröffentlicht wurde.
+          fetch-depth: 0
+
+      - name: Plan release
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          # Quelle der Wahrheit für die Version ist Cargo.toml. Alles andere
+          # (Tag, Release, Dateiname) leitet sich davon ab.
+          cargo_version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+
+          case "$EVENT_NAME" in
+            release)
+              # Release über die GitHub-UI angelegt - nur noch das ZIP anhängen.
+              version="${RELEASE_TAG#v}"
+              mode="attach"
+              ;;
+            push)
+              if [ "$REF_TYPE" = "tag" ]; then
+                # Tag von Hand gepusht.
+                version="${REF_NAME#v}"
+                mode="create"
+              elif git rev-parse -q --verify "refs/tags/v${cargo_version}" >/dev/null; then
+                # Version aus Cargo.toml ist bereits veröffentlicht - dieser
+                # Push hat die Version also nicht angefasst, nichts zu tun.
+                version="$cargo_version"
+                mode="skip"
+              else
+                # Version in Cargo.toml wurde erhöht: Tag und Release werden
+                # daraus erzeugt.
+                version="$cargo_version"
+                mode="create"
+              fi
+              ;;
+            *)
+              # workflow_dispatch: nur bauen, nichts veröffentlichen.
+              version="$cargo_version"
+              mode="none"
+              ;;
+          esac
+
+          # Tag und Cargo.toml dürfen nicht auseinanderlaufen. Da Tags
+          # normalerweise aus Cargo.toml entstehen, ist ein abweichender
+          # Tag fast immer ein Versehen - deshalb Abbruch statt stiller
+          # Veröffentlichung unter falscher Nummer.
+          if [ "$mode" != "skip" ] && [ "$version" != "$cargo_version" ]; then
+            echo "::error::Version $version (aus dem Tag) passt nicht zu Cargo.toml ($cargo_version). Entweder Cargo.toml hochziehen oder den Tag korrigieren."
+            exit 1
+          fi
+
+          if [ "$mode" = "skip" ]; then
+            build=false
+            echo "Version $version ist bereits als Tag v$version veröffentlicht - kein Build nötig."
+          else
+            build=true
+            echo "Version $version, Modus $mode"
+          fi
+
+          {
+            echo "package=openclaw-voicebridge-${version}-macos"
+            echo "tag=v${version}"
+            echo "mode=$mode"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -33,34 +124,9 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Determine package name
-        id: pkg
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          PUSHED_REF: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # Versionsquelle je nach Auslöser: bei Tag/Release der Tag selbst
-          # (führendes "v" entfällt), bei einem manuellen Lauf ohne Tag die
-          # Version aus Cargo.toml.
-          case "$EVENT_NAME" in
-            release) tag="$RELEASE_TAG" ;;
-            push)    tag="$PUSHED_REF" ;;
-            *)       tag="" ;;
-          esac
-          if [ -n "$tag" ]; then
-            version="${tag#v}"
-          else
-            version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
-          fi
-          name="openclaw-voicebridge-${version}-macos"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "Paketname: $name.zip"
-
       - name: Package as ZIP
         env:
-          STAGE: ${{ steps.pkg.outputs.name }}
+          STAGE: ${{ needs.plan.outputs.package }}
         run: |
           set -euo pipefail
           mkdir "$STAGE"
@@ -71,35 +137,36 @@ jobs:
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.name }}
-          path: ${{ steps.pkg.outputs.name }}.zip
+          name: ${{ needs.plan.outputs.package }}
+          path: ${{ needs.plan.outputs.package }}.zip
           retention-days: 14
 
-      - name: Create GitHub Release
-        # Tag gepusht (z. B. per `git push origin <tag>`), aber noch keine
-        # Release dazu vorhanden - Release inkl. ZIP-Anhang neu anlegen.
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      - name: Create tag and GitHub Release
+        # Deckt beide Fälle ab: Version in Cargo.toml erhöht (Tag wird hier
+        # miterzeugt) und von Hand gepushter Tag (existiert dann schon).
+        if: needs.plan.outputs.mode == 'create'
         env:
           GH_TOKEN: ${{ github.token }}
-          ZIP: ${{ steps.pkg.outputs.name }}.zip
+          TAG: ${{ needs.plan.outputs.tag }}
+          ZIP: ${{ needs.plan.outputs.package }}.zip
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
             "$ZIP" \
-            --title "$GITHUB_REF_NAME" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
             --generate-notes
 
       - name: Attach ZIP to existing Release
-        # Release wurde bereits erstellt (z. B. über die GitHub-UI, was den
-        # push-Trigger auf den Tag oft nicht zuverlässig auslöst) - hier nur
-        # noch das ZIP an die vorhandene Release anhängen.
-        if: github.event_name == 'release'
+        # Release wurde bereits über die GitHub-UI erstellt - hier nur noch
+        # das ZIP anhängen.
+        if: needs.plan.outputs.mode == 'attach'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          ZIP: ${{ steps.pkg.outputs.name }}.zip
+          TAG: ${{ needs.plan.outputs.tag }}
+          ZIP: ${{ needs.plan.outputs.package }}.zip
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" \
+          gh release upload "$TAG" \
             "$ZIP" \
             --clobber

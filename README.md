@@ -124,6 +124,40 @@ Die Binary liegt danach unter `target/release/claw-voice-bridge`.
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
 
+## Release
+
+Die Version in `Cargo.toml` ist die einzige Quelle; Tag, Release und
+Dateiname des Archivs leiten sich daraus ab. Ein Release entsteht also so:
+
+```toml
+# Cargo.toml
+version = "1.0.0"
+```
+
+Diese Änderung nach `main` bringen - fertig. Der Workflow
+(`.github/workflows/build-macos.yml`) erkennt beim Push nach `main`, dass
+zur Version aus `Cargo.toml` noch kein Tag existiert, baut auf macOS, legt
+`v1.0.0` an und veröffentlicht die Release mit
+`openclaw-voicebridge-1.0.0-macos.zip` im Anhang.
+
+Existiert der Tag zur Version bereits, passiert nichts - kein Build, kein
+Release. Der Workflow läuft dadurch bei jedem Merge nach `main` an, aber
+nur die Versionsprüfung selbst, nicht der macOS-Build.
+
+Weitere Auslöser bleiben möglich:
+
+| Auslöser | Verhalten |
+|---|---|
+| Push nach `main` mit erhöhter Version | Tag + Release + ZIP |
+| Push nach `main` ohne Versionsänderung | nichts |
+| Von Hand gepushter Tag `v*.*.*` | Release + ZIP zu diesem Tag |
+| Release über die GitHub-UI angelegt | ZIP an die Release anhängen |
+| `workflow_dispatch` | nur bauen, ZIP als Build-Artifact |
+
+Ein Tag, dessen Version nicht zu `Cargo.toml` passt, bricht den Workflow
+mit einer klaren Meldung ab, statt unter falscher Nummer zu
+veröffentlichen.
+
 ## Konfiguration
 
 ```bash
