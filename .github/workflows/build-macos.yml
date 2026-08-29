@@ -33,20 +33,46 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Package as ZIP
+      - name: Determine package name
+        id: pkg
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PUSHED_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          stage="claw-voice-bridge-macos"
-          mkdir "$stage"
-          cp target/release/claw-voice-bridge "$stage/"
-          cp README.md config.example.toml "$stage/"
-          ditto -c -k --sequesterRsrc --keepParent "$stage" claw-voice-bridge-macos.zip
+          # Versionsquelle je nach Auslöser: bei Tag/Release der Tag selbst
+          # (führendes "v" entfällt), bei einem manuellen Lauf ohne Tag die
+          # Version aus Cargo.toml.
+          case "$EVENT_NAME" in
+            release) tag="$RELEASE_TAG" ;;
+            push)    tag="$PUSHED_REF" ;;
+            *)       tag="" ;;
+          esac
+          if [ -n "$tag" ]; then
+            version="${tag#v}"
+          else
+            version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          fi
+          name="openclaw-voicebridge-${version}-macos"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Paketname: $name.zip"
+
+      - name: Package as ZIP
+        env:
+          STAGE: ${{ steps.pkg.outputs.name }}
+        run: |
+          set -euo pipefail
+          mkdir "$STAGE"
+          cp target/release/claw-voice-bridge "$STAGE/"
+          cp README.md config.example.toml "$STAGE/"
+          ditto -c -k --sequesterRsrc --keepParent "$STAGE" "$STAGE.zip"
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claw-voice-bridge-macos
-          path: claw-voice-bridge-macos.zip
+          name: ${{ steps.pkg.outputs.name }}
+          path: ${{ steps.pkg.outputs.name }}.zip
           retention-days: 14
 
       - name: Create GitHub Release
@@ -55,10 +81,11 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
+          ZIP: ${{ steps.pkg.outputs.name }}.zip
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
-            claw-voice-bridge-macos.zip \
+            "$ZIP" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
 
@@ -69,8 +96,10 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ZIP: ${{ steps.pkg.outputs.name }}.zip
         run: |
           set -euo pipefail
-          gh release upload "${{ github.event.release.tag_name }}" \
-            claw-voice-bridge-macos.zip \
+          gh release upload "$RELEASE_TAG" \
+            "$ZIP" \
             --clobber
