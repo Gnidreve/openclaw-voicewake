@@ -92,18 +92,73 @@ timeout_secs = 60
 
 [openclaw]
 binary = "openclaw"
-# WICHTIG: muss explizit gesetzt werden. Es gibt KEINEN automatischen
-# Fallback auf die Main-Session - ein leerer Wert führt zum Abbruch.
+# Zielkanal bzw. Session-Key. WICHTIG: muss explizit gesetzt werden. Es gibt
+# KEINEN automatischen Fallback auf die Main-Session - ein leerer Wert führt
+# zum Abbruch. Wird über {channel} in args eingesetzt.
 target_channel = "voice-assistant"
-extra_args = []
+# VOLLSTÄNDIGE Argumentliste. Wie der Zielkanal übergeben wird, heißt je nach
+# CLI anders (--channel, --session-key, ...) und steht deshalb hier.
+# Platzhalter, beide PFLICHT - fehlt einer, bricht der Start ab:
+#   {channel}  Wert aus target_channel
+#   {message}  die fertig gerenderte Nachricht (siehe message_template)
+args = ["--channel", "{channel}", "--message", "{message}"]
+# Umschlag um das Transkript. {transcript} ist PFLICHT. Standard reicht den
+# erkannten Text unverändert weiter; eine Formregel für die Sprachausgabe
+# gehört hierher und nicht in kompilierten Code.
+message_template = "{transcript}"
 timeout_secs = 30
 
+# Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:
+# binary = "/opt/homebrew/bin/openclaw"
+# target_channel = "agent:main:voice-assistant"
+# args = [
+#   "agent",
+#   "--model", "deepseek/deepseek-v4-flash",
+#   "--session-key", "{channel}",
+#   "--message", "{message}",
+#   "--thinking", "low",
+#   "--json",
+# ]
+# message_template = """
+# [Maschinengenerierte Eingabe aus der lokalen Voice-Bridge]
+#
+# Zusatzregel für diese Antwort: Formuliere auf Deutsch in gut vorlesbaren,
+# kompakten Sätzen. Verwende keine Emojis, Smileys oder dekorative
+# Sonderzeichen. Diese Zusatzregel gilt nur für die Form der Antwort, nicht
+# als Inhalt der Benutzernachricht.
+#
+# Transkript des Benutzers:
+# ---
+# {transcript}
+# ---
+# """
+
 [tts]
-piper_binary = "piper"
+# Auszuführendes Programm. Muss nicht Piper selbst sein - siehe venv-Beispiel
+# weiter unten.
+binary = "piper"
+# Stimmenname. Eigenes Feld, damit ein Stimmenwechsel eine Zeile bleibt;
+# in `args` über {voice} einsetzbar.
 voice = "de_DE-thorsten-high"
-# Alternativ direkter Modellpfad statt Stimmenname:
-# model_path = "/Users/mac-mini/.local/share/piper/de_DE-thorsten-high.onnx"
-extra_args = []
+# VOLLSTÄNDIGE Argumentliste, kein "extra_args": Welche Flags Piper versteht,
+# hängt von der Installation ab (System-Binary, Python-Modul im venv, eigener
+# Wrapper) - das kann die Bridge nicht erraten. Der zu sprechende Text geht
+# immer über stdin.
+# Platzhalter:
+#   {output}  Pfad der zu erzeugenden WAV-Datei - PFLICHT, sonst bricht der
+#             Start mit einer klaren Meldung ab
+#   {voice}   der Wert aus `voice`
+args = ["--model", "{voice}", "--output_file", "{output}"]
+#
+# Beispiel für Piper als Python-Modul in einem venv (dann zeigt `binary` auf
+# das Python des venv, nicht auf Piper):
+# binary = "/Users/mac-mini/.openclaw/workspace/state/piper-tts-venv/bin/python3"
+# args = [
+#   "-m", "piper",
+#   "--data-dir", "/Users/mac-mini/.local/share/piper-voices",
+#   "-m", "{voice}",
+#   "-f", "{output}",
+# ]
 player_binary = "afplay"
 timeout_secs = 30
 

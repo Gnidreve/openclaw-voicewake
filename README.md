@@ -118,11 +118,12 @@ cargo build --release
 
 Die Binary liegt danach unter `target/release/openclaw-voicebridge`.
 
-> **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
-> und `cargo test` (66/66 Tests grün) wurden auf Linux verifiziert. Das
+> **Hinweis:** Entwickelt und geprüft wird meist unter Linux; das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
+> Wer am Code arbeitet, findet Build-Voraussetzungen, Teststrategie und die
+> Invarianten des Projekts in [AGENTS.md](AGENTS.md).
 
 ## Release
 
@@ -250,24 +251,74 @@ Läuft im Vordergrund, gibt bei Erkennung eine Zeile mit
 `wakeword.trigger_pattern` (Standard `WAKE`) auf stdout aus und darf sich
 danach beenden.
 
-### OpenClaw-Adapter (`openclaw.binary`)
+### OpenClaw (`openclaw.binary`)
 
-Wird aufgerufen als:
+Wie bei Piper steht die vollständige Argumentliste in der Konfiguration
+(`openclaw.args`), die Bridge setzt nur Platzhalter ein:
 
+| Platzhalter | Bedeutung | Ort |
+|---|---|---|
+| `{channel}` | Wert aus `openclaw.target_channel` | `args` - **Pflicht** |
+| `{message}` | die gerenderte Nachricht | `args` - **Pflicht** |
+| `{transcript}` | der erkannte Text | `message_template` - **Pflicht** |
+
+Der Grund für die vollständige Liste: Wie der Zielkanal übergeben wird,
+heißt je nach CLI anders. Das echte OpenClaw-CLI erwartet
+`--session-key agent:main:voice-assistant`, ein einfacher Adapter eher
+`--channel voice-assistant`. Ein fest verdrahtetes `--channel` erzwang
+vorher ein Wrapper-Skript, das es wieder umschrieb.
+
+`openclaw.message_template` legt den Umschlag um das Transkript fest -
+gedacht für Formregeln wie "gut vorlesbare Sätze, keine Emojis", damit die
+Sprachausgabe nicht über Symbole stolpert. Solche Formulierungen sind
+Inhalt und werden oft nachjustiert; sie gehören deshalb in die
+Konfiguration und nicht in kompilierten Code. Der Standard reicht das
+Transkript unverändert weiter.
+
+`target_channel` muss gesetzt sein - ist er leer, bricht
+`openclaw-voicebridge` mit Fehler ab, statt irgendeinen Standardkanal zu
+befüllen. Fehlt `{channel}` in `args`, bricht der Start ebenfalls ab: Sonst
+wäre `target_channel` wirkungslos, und die Nachricht liefe womöglich in die
+Standard-Session.
+
+**Antwort:** Gibt das CLI JSON aus (`--json`), liest die Bridge den Text
+aus `result.payloads[0].text`, ersatzweise aus `reply`, `text`, `message`
+oder `content`. Ist die Ausgabe kein JSON-Objekt - etwa reiner Text -, wird
+sie unverändert übernommen. Beides funktioniert ohne Schalter; ein
+externer JSON-Parser wird nicht gebraucht.
+
+`openclaw-voicebridge` ändert nie selbstständig OpenClaw-Konfiguration und
+startet nie ein Gateway neu.
+
+### Piper (`tts.binary`)
+
+Die Argumentliste steht vollständig in `tts.args`; die Bridge setzt nur
+Platzhalter ein und schiebt den zu sprechenden Text über stdin:
+
+| Platzhalter | Bedeutung |
+|---|---|
+| `{output}` | Pfad der zu erzeugenden WAV-Datei - **Pflicht** |
+| `{voice}` | der Wert aus `tts.voice` |
+
+Fehlt `{output}` in `args`, bricht schon der Start mit einer klaren Meldung
+ab, statt beim ersten Sprechversuch zu scheitern.
+
+Der Grund für die vollständige Liste statt fester Flags plus `extra_args`:
+Welche Argumente Piper versteht, hängt von der Installation ab. Als
+System-Binary ist es `piper --model … --output_file …`; liegt Piper als
+Python-Modul in einem venv, muss `-m piper` **vor** allen anderen
+Argumenten stehen, und dann heißen die Flags je nach Aufrufweg auch mal
+`-m`/`-f`/`--data-dir`. Eine fest verdrahtete Reihenfolge kann das nicht
+abbilden - deshalb kommt sie aus der Konfiguration. Für den venv-Fall
+zeigt `tts.binary` entsprechend auf das Python des venv, nicht auf Piper:
+
+```toml
+binary = "/pfad/zum/venv/bin/python3"
+args = ["-m", "piper", "--data-dir", "/pfad/zu/piper-voices",
+        "-m", "{voice}", "-f", "{output}"]
 ```
-<binary> <extra_args...> --channel <target_channel> --message "<transkript>"
-```
 
-Die Antwort wird von stdout gelesen. `target_channel` muss in `config.toml`
-gesetzt sein - ist er leer, bricht `openclaw-voicebridge` mit Fehler ab, statt
-irgendeinen Standardkanal zu befüllen. Diese CLI ist bewusst ein
-eigenständiger, austauschbarer Adapter: `openclaw-voicebridge` ändert nie
-selbstständig OpenClaw-Konfiguration und startet nie ein Gateway neu.
-
-### Piper (`tts.piper_binary`)
-
-Aufruf mit `--output_file <wav>` sowie entweder `--model <model_path>`
-(falls gesetzt) oder `--voice <voice>`. Text wird über stdin übergeben.
+Damit erübrigt sich ein vorgeschaltetes Wrapper-Skript.
 
 ## Bestätigungstöne
 
@@ -463,28 +514,10 @@ Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
 cargo test
 ```
 
-Abgedeckt sind u. a.:
-
-- Zustandsmaschine: erlaubte/verbotene Übergänge, vollständiger Zyklus,
-  Recovery nach `IDLE` aus jedem Zwischenzustand.
-- VAD-Timeout-Logik: Fortsetzen bei Sprache, Stopp nach Stille-Timeout -
-  mit und ohne jemals erkannte Sprache, über denselben Weg und nach
-  derselben Zeit -, Sprechen verzögert das Ende nur, Stopp beim
-  Sicherheitsnetz, und `max_recording_seconds = 0` schaltet dieses ab.
-- VAD-Sprach-Erkennung: verstreute laute Einzelframes öffnen das Gate
-  **nicht** (Regression aus dem Feldtest), kurze Silbenpausen setzen einen
-  laufenden Sprach-Abschnitt nicht zurück, eine lange Pause schon, und der
-  Stille-Timeout greift auch nach einem zurückgesetzten Abschnitt.
-- CLI-Argument-Konstruktion für `whisper-cli`, `ffmpeg`, den
-  OpenClaw-Adapter und `piper` (inkl. `extra_args`, explizitem
-  Zielkanal, Modell- vs. Stimmen-Auswahl bei Piper).
-- Config-Defaults und -Validierung (u. a. Ablehnung eines leeren
-  `openclaw.target_channel`), Ableitung des Sperrdatei-Pfads.
-- CLI-Flag-Parsing (`--dry-run`, `--dry-run-file`, Defaults).
-- Einzelinstanz-Sperre: Belegen, Ablehnen einer zweiten Sperre inkl. PID in
-  der Meldung, erneutes Belegen nach Freigabe.
-- Transkript-Filter: Normalisierung, Treffer auf den Halluzinationen aus dem
-  Feldtest, keine Treffer auf echten Eingaben, leere Muster/Transkripte.
+Läuft ohne installiertes ffmpeg/whisper/Piper/OpenClaw durch - ein
+Integrationstest spielt die komplette Runde gegen Stub-Programme durch.
+Was im Einzelnen abgedeckt ist und wie man Änderungen an der Prozesskette
+prüft, steht in [AGENTS.md](AGENTS.md#tests).
 
 ## Bekannte Einschränkungen / Annahmen
 
@@ -499,3 +532,6 @@ Abgedeckt sind u. a.:
   auf dem tatsächlichen macOS-Zielsystem `cargo build --release` und
   `cargo test` erneut ausführen sowie den `--dry-run`-Modus mit den echten
   whisper-cli/Piper/OpenClaw-Binaries durchspielen.
+- Was noch offen ist und warum, steht durchgängig in `ideas.md`; die
+  Invarianten, die dabei nicht gebrochen werden dürfen, in
+  [AGENTS.md](AGENTS.md#invarianten).
