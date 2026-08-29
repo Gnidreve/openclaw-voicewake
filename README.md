@@ -28,8 +28,11 @@ also nicht selbst erneut triggern.
 Nach einer vorgelesenen Antwort bleibt der Kanal offen: `SPEAKING` springt
 direkt zurück nach `RECORDING` und spielt dabei den Start-Ton (siehe
 [Bestätigungstöne](#bestätigungstöne)), sodass eine Folgeeingabe ohne
-erneutes Wake-Word möglich ist - dieselbe VAD-/Timeout-Logik wie beim
-ersten Aufnahmedurchgang gilt auch hier. Bleibt diese Folgeaufnahme ohne
+erneutes Wake-Word möglich ist. Eine Runde ist dabei genau **eine**
+Funktion (`run_round`), die für beide Auslöser identisch läuft - Wake-Word
+und Folgerunde unterscheiden sich nur darin, wer sie aufruft, nicht in
+ihrem Ablauf. Beim Debuggen taugt die erste Runde deshalb als Referenz für
+alle weiteren. Bleibt diese Folgeaufnahme ohne
 erkannte Sprache (leeres Transkript) oder liefert OpenClaw keine Antwort,
 geht der Dienst nach `IDLE` zurück - ab dann ist wieder das Wake-Word
 nötig. Dass der Kanal zu ist, hört man daran, dass kein neuer Start-Ton
@@ -42,6 +45,36 @@ Grenze können Fremdgeräusche im Raum - im Feldtest ein laufender Fernseher -
 den Kanal beliebig lange offen halten, weil jede "Eingabe" wieder eine
 Antwort erzeugt. Mit `max_followup_turns = 0` ist nach jeder Antwort sofort
 wieder das Wake-Word nötig.
+
+## Wann eine Aufnahme endet
+
+Es gibt genau **eine** Uhr: `vad.silence_timeout_ms` (Standard 4000 ms).
+Sie läuft ab dem ersten Frame und wird von jedem Frame über
+`vad.silence_rms_threshold` wieder auf null gesetzt. Läuft sie ab, endet
+die Aufnahme.
+
+Das gilt bewusst unabhängig davon, ob überhaupt jemand gesprochen hat:
+
+- **Niemand spricht** → die Uhr läuft nach 4 s ab, die Aufnahme endet,
+  `speech_started` ist `false` → kein Absende-Ton, Whisper wird nicht
+  aufgerufen, es geht nichts an OpenClaw.
+- **Jemand spricht** → jedes Sprach-Frame setzt die Uhr zurück, die
+  Aufnahme läuft weiter. 4 s nach dem letzten Wort endet sie.
+
+Sprechen *verzögert* das Ende also nur; es ist kein zweiter Mechanismus.
+Derselbe Wert ist damit sowohl die Zeit, die man nach dem Wake-Word zum
+Anfangen hat, als auch die Pause, die eine Äußerung beenden darf.
+
+`vad.max_recording_seconds` ist **keine** Längenbegrenzung für Sprache,
+sondern ein Sicherheitsnetz: Liegt die Umgebungslautstärke dauerhaft über
+dem Schwellwert (laufender Fernseher), läuft die Uhr nie ab und der
+Aufnahmepuffer würde unbegrenzt wachsen. Der Standard (300 s) liegt weit
+über jeder realistischen Äußerung, `0` schaltet das Netz ganz ab.
+
+> Früher setzte der Stille-Timeout erkannte Sprache voraus. Eine Runde
+> ohne jede Sprache konnte deshalb gar nicht regulär enden und lief in den
+> damaligen 60-Sekunden-Deckel - eine Minute, bevor überhaupt auffiel,
+> dass nichts angekommen war.
 
 ## Voraussetzungen
 
@@ -86,7 +119,7 @@ cargo build --release
 Die Binary liegt danach unter `target/release/claw-voice-bridge`.
 
 > **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
-> und `cargo test` (64/64 Tests grün) wurden auf Linux verifiziert. Das
+> und `cargo test` (66/66 Tests grün) wurden auf Linux verifiziert. Das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
@@ -354,9 +387,12 @@ das würde sonst Dropouts/Knacken im Mikrofonsignal riskieren. Bei
 Backpressure (Channel voll) werden einzelne Chunks verworfen und am Ende
 der Aufnahme als `dropped_chunks` geloggt; der Channel-Puffer ist mit
 512 Chunks großzügig bemessen, damit das im Normalbetrieb praktisch nie
-vorkommt. Der Sample-Puffer einer Aufnahme wird vorab auf
-`max_recording_seconds` dimensioniert, damit während der Aufnahme keine
-wiederholten Reallocations mit vollständiger Kopie anfallen. Die
+vorkommt. Der Sample-Puffer einer Aufnahme wird vorab auf eine typische
+Äußerungslänge dimensioniert, damit im Normalfall keine wiederholten
+Reallocations mit vollständiger Kopie anfallen - bewusst nicht auf
+`max_recording_seconds`, das inzwischen ein hoch angesetztes
+Sicherheitsnetz ist; längere Aufnahmen lässt der Puffer regulär wachsen.
+Die
 VAD-Verarbeitung berechnet die RMS-Energie direkt auf dem bestehenden
 Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
 
@@ -373,7 +409,8 @@ Puffer-Slice statt pro Frame einen neuen Vec zu allozieren.
   Diagnose-Hilfe - mit `transcription_log.enabled = false` abschaltbar.
 - Keine API-Keys im Quellcode - alle externen Aufrufe laufen über lokale
   CLI-Kommandos, die du selbst konfigurierst.
-- Timeouts für Aufnahme (`max_recording_seconds`), Whisper, OpenClaw und
+- Timeouts für Aufnahme (`vad.silence_timeout_ms`, plus
+  `max_recording_seconds` als Sicherheitsnetz), Whisper, OpenClaw und
   Piper (jeweils `timeout_secs`).
 - SIGINT/SIGTERM werden abgefangen; der Dienst beendet den aktuellen Zyklus
   und stoppt danach sauber.
@@ -396,8 +433,10 @@ Abgedeckt sind u. a.:
 
 - Zustandsmaschine: erlaubte/verbotene Übergänge, vollständiger Zyklus,
   Recovery nach `IDLE` aus jedem Zwischenzustand.
-- VAD-Timeout-Logik: Fortsetzen bei Sprache, Stopp nach Stille-Timeout,
-  Stopp bei `max_recording_seconds`, kein Stopp vor erkannter Sprache.
+- VAD-Timeout-Logik: Fortsetzen bei Sprache, Stopp nach Stille-Timeout -
+  mit und ohne jemals erkannte Sprache, über denselben Weg und nach
+  derselben Zeit -, Sprechen verzögert das Ende nur, Stopp beim
+  Sicherheitsnetz, und `max_recording_seconds = 0` schaltet dieses ab.
 - VAD-Sprach-Erkennung: verstreute laute Einzelframes öffnen das Gate
   **nicht** (Regression aus dem Feldtest), kurze Silbenpausen setzen einen
   laufenden Sprach-Abschnitt nicht zurück, eine lange Pause schon, und der
