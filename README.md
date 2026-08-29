@@ -250,19 +250,44 @@ Läuft im Vordergrund, gibt bei Erkennung eine Zeile mit
 `wakeword.trigger_pattern` (Standard `WAKE`) auf stdout aus und darf sich
 danach beenden.
 
-### OpenClaw-Adapter (`openclaw.binary`)
+### OpenClaw (`openclaw.binary`)
 
-Wird aufgerufen als:
+Wie bei Piper steht die vollständige Argumentliste in der Konfiguration
+(`openclaw.args`), die Bridge setzt nur Platzhalter ein:
 
-```
-<binary> <extra_args...> --channel <target_channel> --message "<transkript>"
-```
+| Platzhalter | Bedeutung | Ort |
+|---|---|---|
+| `{channel}` | Wert aus `openclaw.target_channel` | `args` - **Pflicht** |
+| `{message}` | die gerenderte Nachricht | `args` - **Pflicht** |
+| `{transcript}` | der erkannte Text | `message_template` - **Pflicht** |
 
-Die Antwort wird von stdout gelesen. `target_channel` muss in `config.toml`
-gesetzt sein - ist er leer, bricht `openclaw-voicebridge` mit Fehler ab, statt
-irgendeinen Standardkanal zu befüllen. Diese CLI ist bewusst ein
-eigenständiger, austauschbarer Adapter: `openclaw-voicebridge` ändert nie
-selbstständig OpenClaw-Konfiguration und startet nie ein Gateway neu.
+Der Grund für die vollständige Liste: Wie der Zielkanal übergeben wird,
+heißt je nach CLI anders. Das echte OpenClaw-CLI erwartet
+`--session-key agent:main:voice-assistant`, ein einfacher Adapter eher
+`--channel voice-assistant`. Ein fest verdrahtetes `--channel` erzwang
+vorher ein Wrapper-Skript, das es wieder umschrieb.
+
+`openclaw.message_template` legt den Umschlag um das Transkript fest -
+gedacht für Formregeln wie "gut vorlesbare Sätze, keine Emojis", damit die
+Sprachausgabe nicht über Symbole stolpert. Solche Formulierungen sind
+Inhalt und werden oft nachjustiert; sie gehören deshalb in die
+Konfiguration und nicht in kompilierten Code. Der Standard reicht das
+Transkript unverändert weiter.
+
+`target_channel` muss gesetzt sein - ist er leer, bricht
+`openclaw-voicebridge` mit Fehler ab, statt irgendeinen Standardkanal zu
+befüllen. Fehlt `{channel}` in `args`, bricht der Start ebenfalls ab: Sonst
+wäre `target_channel` wirkungslos, und die Nachricht liefe womöglich in die
+Standard-Session.
+
+**Antwort:** Gibt das CLI JSON aus (`--json`), liest die Bridge den Text
+aus `result.payloads[0].text`, ersatzweise aus `reply`, `text`, `message`
+oder `content`. Ist die Ausgabe kein JSON-Objekt - etwa reiner Text -, wird
+sie unverändert übernommen. Beides funktioniert ohne Schalter; ein
+externer JSON-Parser wird nicht gebraucht.
+
+`openclaw-voicebridge` ändert nie selbstständig OpenClaw-Konfiguration und
+startet nie ein Gateway neu.
 
 ### Piper (`tts.binary`)
 

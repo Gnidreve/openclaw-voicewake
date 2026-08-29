@@ -158,10 +158,21 @@ impl Default for WhisperConfig {
 #[serde(default)]
 pub struct OpenClawConfig {
     pub binary: String,
-    /// Zielkanal/Agent. MUSS explizit gesetzt werden - kein automatischer
-    /// Fallback auf die Main-Session.
+    /// Zielkanal/Agent bzw. Session-Key. MUSS explizit gesetzt werden - kein
+    /// automatischer Fallback auf die Main-Session. Wird über `{channel}` in
+    /// `args` eingesetzt.
     pub target_channel: String,
-    pub extra_args: Vec<String>,
+    /// Vollständige Argumentliste. Wie der Zielkanal übergeben wird, heißt je
+    /// nach CLI anders (`--channel`, `--session-key`, ...), deshalb steht der
+    /// Flag-Name hier und nicht im Code. Platzhalter:
+    ///   `{channel}` - Wert aus `target_channel` (Pflicht)
+    ///   `{message}` - die fertig gerenderte Nachricht (Pflicht)
+    pub args: Vec<String>,
+    /// Umschlag um das Transkript. `{transcript}` (Pflicht) wird durch den
+    /// erkannten Text ersetzt. Gedacht für Formregeln wie "gut vorlesbare
+    /// Sätze, keine Emojis" - solche Formulierungen sind Inhalt und gehören
+    /// in die Konfiguration, nicht in kompilierten Code.
+    pub message_template: String,
     pub timeout_secs: u64,
 }
 impl Default for OpenClawConfig {
@@ -169,7 +180,13 @@ impl Default for OpenClawConfig {
         Self {
             binary: "openclaw".to_string(),
             target_channel: String::new(),
-            extra_args: vec![],
+            args: ["--channel", "{channel}", "--message", "{message}"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            // Standard: das Transkript unverändert weiterreichen. Wer eine
+            // Formregel will, setzt sie bewusst in der eigenen Konfiguration.
+            message_template: "{transcript}".to_string(),
             timeout_secs: 30,
         }
     }
@@ -320,6 +337,45 @@ impl Config {
                  konfiguriert werden und wird NICHT automatisch auf die Main-Session gesetzt."
             );
         }
+        // Ohne `{channel}` erreicht der Zielkanal das CLI nicht - dann wäre
+        // `target_channel` wirkungslos und die Nachricht liefe womöglich in
+        // die Standard-Session. Genau das soll die Prüfung oben verhindern.
+        if !self
+            .openclaw
+            .args
+            .iter()
+            .any(|arg| arg.contains(crate::openclaw::CHANNEL_PLACEHOLDER))
+        {
+            anyhow::bail!(
+                "openclaw.args enthält keinen {} -Platzhalter. Der Zielkanal aus \
+                 target_channel würde das CLI damit nie erreichen.",
+                crate::openclaw::CHANNEL_PLACEHOLDER
+            );
+        }
+        if !self
+            .openclaw
+            .args
+            .iter()
+            .any(|arg| arg.contains(crate::openclaw::MESSAGE_PLACEHOLDER))
+        {
+            anyhow::bail!(
+                "openclaw.args enthält keinen {} -Platzhalter - das Transkript \
+                 würde nie übergeben.",
+                crate::openclaw::MESSAGE_PLACEHOLDER
+            );
+        }
+        if !self
+            .openclaw
+            .message_template
+            .contains(crate::openclaw::TRANSCRIPT_PLACEHOLDER)
+        {
+            anyhow::bail!(
+                "openclaw.message_template enthält keinen {} -Platzhalter - der \
+                 erkannte Text käme im Umschlag nicht vor.",
+                crate::openclaw::TRANSCRIPT_PLACEHOLDER
+            );
+        }
+
         // Ohne diesen Platzhalter bekäme Piper nie einen Ausgabepfad: Es
         // entstünde keine WAV-Datei, und der Fehler zeigte sich erst beim
         // ersten Sprechversuch statt beim Start.
