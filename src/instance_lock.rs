@@ -1,7 +1,7 @@
 //! Einzelinstanz-Sperre.
 //!
 //! Hintergrund aus dem Feldtest: Liefen versehentlich zwei
-//! claw-voice-bridge-Prozesse gleichzeitig, startete jeder von ihnen einen
+//! openclaw-voicebridge-Prozesse gleichzeitig, startete jeder von ihnen einen
 //! eigenen Wake-Word-Listener. Beide griffen dann auf dasselbe Mikrofon zu und
 //! nahmen parallel auf - was sich im Log als doppelte Listener-Starts pro
 //! Zyklus zeigte und die Zyklen der beiden Instanzen ineinander laufen ließ.
@@ -25,7 +25,7 @@ use tracing::{info, warn};
 /// Fester Pfad der Sperrdatei im Systemtemp-Verzeichnis (unter macOS je
 /// Benutzer, was der Reichweite des Dienstes entspricht).
 pub fn lock_path() -> PathBuf {
-    std::env::temp_dir().join("claw-voice-bridge.lock")
+    std::env::temp_dir().join("openclaw-voicebridge.lock")
 }
 
 /// Hält die Sperre, solange dieser Wert lebt. Beim Drop (bzw. spätestens beim
@@ -60,7 +60,7 @@ impl InstanceLock {
         if !try_lock(&file)? {
             let holder = read_pid(&mut file);
             anyhow::bail!(
-                "Es läuft bereits eine claw-voice-bridge-Instanz{} (Sperrdatei: {}). \
+                "Es läuft bereits eine openclaw-voicebridge-Instanz{} (Sperrdatei: {}). \
                  Zwei Instanzen würden sich um Mikrofon und Wake-Word-Listener streiten; \
                  Parallelbetrieb ist deshalb nicht vorgesehen. Beende zuerst die laufende \
                  Instanz.",
@@ -129,7 +129,7 @@ mod tests {
     /// nebenher laufende Instanz aussperren (und umgekehrt).
     fn temp_lock_path() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "claw-voice-bridge-test-{}.lock",
+            "openclaw-voicebridge-test-{}.lock",
             uuid::Uuid::new_v4()
         ))
     }
@@ -156,7 +156,7 @@ mod tests {
             .expect_err("zweite Sperre auf derselben Datei muss abgelehnt werden");
         let message = err.to_string();
         assert!(
-            message.contains("bereits eine claw-voice-bridge-Instanz"),
+            message.contains("bereits eine openclaw-voicebridge-Instanz"),
             "unerwartete Meldung: {message}"
         );
         assert!(
@@ -175,14 +175,16 @@ mod tests {
     fn lock_path_is_fixed_and_independent_of_the_configured_temp_dir() {
         assert_eq!(
             lock_path(),
-            std::env::temp_dir().join("claw-voice-bridge.lock")
+            std::env::temp_dir().join("openclaw-voicebridge.lock")
         );
     }
 
     #[test]
     fn acquire_creates_missing_parent_directories() {
-        let dir =
-            std::env::temp_dir().join(format!("claw-voice-bridge-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "openclaw-voicebridge-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let path = dir.join("nested").join("bridge.lock");
         let lock = InstanceLock::acquire(&path).expect("Sperre sollte Verzeichnisse anlegen");
         assert!(path.exists());

@@ -1,4 +1,4 @@
-# claw-voice-bridge
+# openclaw-voicebridge
 
 Lokaler Sprachdienst für macOS (Apple Silicon):
 
@@ -101,8 +101,8 @@ Freigabe:
    für das ausführende Terminal/die Binary.
 2. Falls das nicht automatisch erscheint oder abgelehnt wurde: **Systemeinstellungen
    → Datenschutz & Sicherheit → Mikrofon** öffnen und das Terminal (bzw.
-   die kompilierte `claw-voice-bridge`-Binary) aktivieren.
-3. Ohne diese Freigabe liefert `claw-voice-bridge` beim Start der Aufnahme
+   die kompilierte `openclaw-voicebridge`-Binary) aktivieren.
+3. Ohne diese Freigabe liefert `openclaw-voicebridge` beim Start der Aufnahme
    einen klaren Fehler statt eines Absturzes und beendet den aktuellen
    Zyklus (Zustand geht zurück auf `IDLE`).
 4. Ist gar kein Mikrofon vorhanden, wird ebenfalls ein klarer Fehler
@@ -112,17 +112,51 @@ Freigabe:
 
 ```bash
 git clone <dieses-repo>
-cd claw-voice-bridge
+cd openclaw-voicebridge
 cargo build --release
 ```
 
-Die Binary liegt danach unter `target/release/claw-voice-bridge`.
+Die Binary liegt danach unter `target/release/openclaw-voicebridge`.
 
 > **Hinweis:** `cargo build --release`, `cargo clippy` (ohne Warnungen)
 > und `cargo test` (66/66 Tests grün) wurden auf Linux verifiziert. Das
 > eigentliche CoreAudio-/Mikrofon-Verhalten sowie whisper-cli/Piper/
 > OpenClaw-Integration lassen sich nur auf einem macOS-Zielsystem mit den
 > tatsächlichen Binaries testen (siehe [Dry-Run](#dry-run-ohne-mikrofon)).
+
+## Release
+
+Die Version in `Cargo.toml` ist die einzige Quelle; Tag, Release und
+Dateiname des Archivs leiten sich daraus ab. Ein Release entsteht also so:
+
+```toml
+# Cargo.toml
+version = "1.0.0"
+```
+
+Diese Änderung nach `main` bringen - fertig. Der Workflow
+(`.github/workflows/build-macos.yml`) erkennt beim Push nach `main`, dass
+zur Version aus `Cargo.toml` noch kein Tag existiert, baut auf macOS, legt
+`v1.0.0` an und veröffentlicht die Release mit
+`openclaw-voicebridge-1.0.0-macos.zip` im Anhang.
+
+Existiert der Tag zur Version bereits, passiert nichts - kein Build, kein
+Release. Der Workflow läuft dadurch bei jedem Merge nach `main` an, aber
+nur die Versionsprüfung selbst, nicht der macOS-Build.
+
+Weitere Auslöser bleiben möglich:
+
+| Auslöser | Verhalten |
+|---|---|
+| Push nach `main` mit erhöhter Version | Tag + Release + ZIP |
+| Push nach `main` ohne Versionsänderung | nichts |
+| Von Hand gepushter Tag `v*.*.*` | Release + ZIP zu diesem Tag |
+| Release über die GitHub-UI angelegt | ZIP an die Release anhängen |
+| `workflow_dispatch` | nur bauen, ZIP als Build-Artifact |
+
+Ein Tag, dessen Version nicht zu `Cargo.toml` passt, bricht den Workflow
+mit einer klaren Meldung ab, statt unter falscher Nummer zu
+veröffentlichen.
 
 ## Konfiguration
 
@@ -136,13 +170,13 @@ Piper, `openclaw.target_channel` (siehe unten) und ggf. das Mikrofon.
 Alle Werte lassen sich zusätzlich per CLI-Flag überschreiben:
 
 ```bash
-claw-voice-bridge --config /pfad/zu/config.toml --log-level debug
+openclaw-voicebridge --config /pfad/zu/config.toml --log-level debug
 ```
 
 ## Start
 
 ```bash
-claw-voice-bridge --config config.toml
+openclaw-voicebridge --config config.toml
 ```
 
 Der Dienst läuft dauerhaft im Vordergrund (Zustandsmaschine in Endlosschleife)
@@ -154,8 +188,8 @@ Gesprächsrunden umfassen, solange der Kanal offen bleibt (siehe
 
 ### Nur eine Instanz gleichzeitig
 
-Beim Start belegt `claw-voice-bridge` eine `flock`-Sperre auf
-`claw-voice-bridge.lock` im Systemtemp-Verzeichnis. Läuft bereits eine
+Beim Start belegt `openclaw-voicebridge` eine `flock`-Sperre auf
+`openclaw-voicebridge.lock` im Systemtemp-Verzeichnis. Läuft bereits eine
 Instanz, bricht der zweite Start mit einer Meldung inklusive der PID der
 laufenden Instanz ab, statt still danebenzulaufen.
 
@@ -190,7 +224,7 @@ deutlich über dem beobachteten Grundrauschen wählen.
 ## Dry-Run (ohne Mikrofon)
 
 ```bash
-claw-voice-bridge --config config.toml --dry-run --dry-run-file beispiel.wav --once
+openclaw-voicebridge --config config.toml --dry-run --dry-run-file beispiel.wav --once
 ```
 
 Im Dry-Run wird das Wake-Word sofort als erkannt simuliert und die
@@ -203,7 +237,7 @@ Schritt mit einer klaren Fehlermeldung fehl (kein Absturz).
 
 Ein Dry-Run-Durchlauf bleibt dabei immer einmalig, auch wenn Transkript und
 OpenClaw-Antwort nicht leer sind: Anders als im Realbetrieb öffnet
-`claw-voice-bridge` den Kanal danach **nicht** für eine Folgeeingabe (siehe
+`openclaw-voicebridge` den Kanal danach **nicht** für eine Folgeeingabe (siehe
 [Zustandsmaschine](#zustandsmaschine)), da im Dry-Run sonst dieselbe
 `--dry-run-file` erneut "aufgenommen" würde - das würde bei erkannter
 Sprache sonst zu einer Endlosschleife mit identischer Eingabe führen.
@@ -225,9 +259,9 @@ Wird aufgerufen als:
 ```
 
 Die Antwort wird von stdout gelesen. `target_channel` muss in `config.toml`
-gesetzt sein - ist er leer, bricht `claw-voice-bridge` mit Fehler ab, statt
+gesetzt sein - ist er leer, bricht `openclaw-voicebridge` mit Fehler ab, statt
 irgendeinen Standardkanal zu befüllen. Diese CLI ist bewusst ein
-eigenständiger, austauschbarer Adapter: `claw-voice-bridge` ändert nie
+eigenständiger, austauschbarer Adapter: `openclaw-voicebridge` ändert nie
 selbstständig OpenClaw-Konfiguration und startet nie ein Gateway neu.
 
 ### Piper (`tts.piper_binary`)
@@ -314,7 +348,7 @@ Bestätigungstöne hängt auch der Fehlerton an `sound.enabled`.
 
 ## Transcription-Log
 
-Zusätzlich zu den strukturierten `tracing`-Logs schreibt `claw-voice-bridge`
+Zusätzlich zu den strukturierten `tracing`-Logs schreibt `openclaw-voicebridge`
 ein einfaches, chat-artiges Log nach `transcription_log.path` (Standard:
 `transcription.log` im Arbeitsverzeichnis, Append-Modus). Pro Runde gibt es
 genau eine `[Input]`- und eine `[Output]`-Zeile:

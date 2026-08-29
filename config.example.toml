@@ -1,4 +1,4 @@
-# claw-voice-bridge - Beispielkonfiguration
+# openclaw-voicebridge - Beispielkonfiguration
 # Kopieren nach config.toml und an die eigene Umgebung anpassen:
 #   cp config.example.toml config.toml
 
@@ -16,7 +16,7 @@ mic_open_delay_ms = 200
 # Konfigurierbares, lokal laufendes Wake-Word-Kommando - keine Cloud-API.
 # Vertrag: Das Kommando läuft im Vordergrund und schreibt bei Erkennung eine
 # Zeile auf stdout, die den String aus `trigger_pattern` enthält, danach darf
-# es sich beenden (claw-voice-bridge startet es bei jedem Zyklus neu).
+# es sich beenden (openclaw-voicebridge startet es bei jedem Zyklus neu).
 # Beispiel-Implementierungen: ein kleines Python-/Rust-Skript um openWakeWord
 # oder Porcupine herum, das genau dieses stdout-Protokoll spricht.
 command = "openwakeword-listener"
@@ -127,7 +127,7 @@ path = "transcription.log"
 ffmpeg_binary = "ffmpeg"
 # temp_dir = "/tmp"
 log_level = "info"
-# Hinweis: Es kann immer nur eine claw-voice-bridge-Instanz gleichzeitig
+# Hinweis: Es kann immer nur eine openclaw-voicebridge-Instanz gleichzeitig
 # laufen (Sperrdatei im Systemtemp-Verzeichnis, nicht konfigurierbar). Ein
 # zweiter Start bricht mit einer klaren Meldung inkl. PID der laufenden
 # Instanz ab, siehe README.
