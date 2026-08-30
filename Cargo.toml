@@ -1,6 +1,6 @@
 [package]
 name = "openclaw-voicebridge"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Lokaler macOS-Sprachdienst: Wake-Word -> VAD -> Whisper -> OpenClaw -> Piper TTS"
 
@@ -18,6 +18,10 @@ thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 cpal = "0.15"
+# Lock-freier SPSC-Ringpuffer zwischen dem Echtzeit-Audio-Callback und der
+# Aufnahmeschleife (siehe src/audio.rs) - der Callback allokiert dadurch
+# nichts mehr auf dem Heap.
+ringbuf = "0.5.1"
 hound = "3.5"
 uuid = { version = "1", features = ["v4"] }
 # Für das Auslesen der Antwort aus der JSON-Ausgabe des OpenClaw-CLI.

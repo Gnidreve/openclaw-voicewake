@@ -430,15 +430,14 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
         (capture.sample_rate as u64 * PREALLOC_SECONDS * capture.channels as u64) as usize;
     let mut samples: Vec<f32> = Vec::with_capacity(prealloc_samples);
     let mut frame_buf: Vec<f32> = Vec::with_capacity(frame_samples * 2);
+    let mut chunk: Vec<f32> = Vec::new();
 
     'outer: loop {
-        let chunk = match capture.receiver.recv().await {
-            Some(c) => c,
-            None => {
-                warn!("Audio-Stream unerwartet beendet");
-                break;
-            }
-        };
+        chunk.clear();
+        if !capture.recv_into(&mut chunk).await {
+            warn!("Audio-Stream unerwartet beendet");
+            break;
+        }
         samples.extend_from_slice(&chunk);
         frame_buf.extend_from_slice(&chunk);
 
@@ -462,11 +461,11 @@ async fn record_until_silence(cfg: &Config, out_path: &Path) -> Result<bool> {
         }
     }
 
-    let dropped = capture.dropped_chunks.load(Ordering::Relaxed);
+    let dropped = capture.dropped_samples.load(Ordering::Relaxed);
     if dropped > 0 {
         warn!(
-            dropped_chunks = dropped,
-            "Audio-Chunks wegen Backpressure verworfen - Aufnahme könnte kleine Lücken enthalten"
+            dropped_samples = dropped,
+            "Audio-Samples wegen vollem Ringpuffer verworfen - Aufnahme könnte kleine Lücken enthalten"
         );
     }
     audio::write_wav(out_path, &samples, capture.sample_rate, capture.channels)?;

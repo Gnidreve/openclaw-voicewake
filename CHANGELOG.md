@@ -14,6 +14,21 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-30
+
+### Geändert
+
+- Der Echtzeit-Audio-Callback allokiert nicht mehr auf dem Heap: Ein
+  Lock-freier SPSC-Ringpuffer (`ringbuf`) ersetzt den bisherigen
+  `mpsc::channel<Vec<f32>>`. F32-Samples werden per `push_slice` direkt aus
+  dem cpal-Puffer übernommen, I16-Samples über einen festen Stack-
+  Scratch-Puffer konvertiert - beides ohne neue Vec-Allokation pro
+  Callback-Aufruf. Die Aufnahmeschleife wird über `tokio::sync::Notify`
+  geweckt, sobald neue Samples verfügbar sind.
+- `AudioCapture::dropped_chunks` heißt jetzt `dropped_samples`: Bei vollem
+  Ringpuffer werden einzelne Samples verworfen, nicht mehr ganze Chunks
+  wie beim alten Channel-basierten Ansatz.
+
 ## [0.1.6] - 2026-08-30
 
 ### Behoben
@@ -292,7 +307,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.3...v0.1.4
