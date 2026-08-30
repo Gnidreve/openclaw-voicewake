@@ -4,7 +4,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{info, warn};
 
-use crate::child_process::spawn_isolated;
 use crate::config::WakeWordConfig;
 
 /// Startet den konfigurierten externen Wake-Word-Prozess und wartet, bis eine
@@ -27,7 +26,23 @@ pub async fn wait_for_wakeword(cfg: &WakeWordConfig) -> Result<()> {
 
     info!(command = %cfg.command, "Starte Wake-Word-Erkennung");
 
-    let (mut child, _pg_guard) = spawn_isolated(&mut cmd).with_context(|| {
+    // ANDERS als bei ffmpeg/whisper-cli/OpenClaw-CLI/Piper bewusst OHNE
+    // `child_process::spawn_isolated`: Der Wake-Word-Prozess ist der einzige
+    // Aufruf, der tatsächlich das Mikrofon öffnet (das externe Skript startet
+    // dafür intern sein eigenes ffmpeg). `spawn_isolated`s `process_group(0)`
+    // hebt den Prozess in eine neue, von Terminal.app getrennte
+    // Prozessgruppe - genau das bricht auf macOS die TCC-Vererbung der
+    // Mikrofon-Berechtigung von Terminal.app auf den Kindprozess: Feldtest
+    // nach 0.2.2 zeigte, dass der Prozess dann zwar startet, aber nie
+    // Audio-Daten bekommt (ffmpeg hängt mit ~0% CPU in einem blockierenden
+    // Read). Git-Historie bestätigt den Auslöser: `spawn_isolated` kam erst
+    // mit 0.1.9 dazu, 0.1.6 (davor) funktionierte nachweislich noch. Der
+    // Kompromiss: `kill_on_drop(true)` deckt weiterhin die direkte PID bei
+    // Timeout/Shutdown ab: nur ein von diesem Skript selbst verwaistes
+    // ffmpeg (falls es beim SIGKILL des Elternprozesses nicht selbst
+    // aufräumt) wäre nicht erfasst - hinnehmbar gegenüber "Wake-Word
+    // funktioniert gar nicht".
+    let mut child = cmd.spawn().with_context(|| {
         format!(
             "Kann Wake-Word-Kommando nicht starten: '{}' (ist es installiert und im PATH?)",
             cfg.command
