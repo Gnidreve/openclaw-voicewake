@@ -4,6 +4,7 @@ mod instance_lock;
 mod openclaw;
 mod sound;
 mod state;
+mod template;
 mod transcribe;
 mod transcript_filter;
 mod transcript_log;
