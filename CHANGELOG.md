@@ -14,6 +14,17 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-08-30
+
+### Hinzugefügt
+
+- `StateMachine::require(state)`: bricht mit klarem Fehler ab, wenn der
+  aktuelle Zustand nicht der erwartete ist. Wake-Word-Lauschen und
+  TTS-Wiedergabe hingen bisher nur über die Aufrufreihenfolge in `main.rs`
+  am richtigen Zustand - jetzt erzwingt eine tatsächliche Prüfung direkt
+  vor dem jeweiligen Aufruf, dass beide nur in `LISTENING_FOR_WAKEWORD`
+  bzw. `SPEAKING` laufen können.
+
 ## [0.1.9] - 2026-08-30
 
 ### Hinzugefügt
@@ -333,7 +344,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...v0.1.7

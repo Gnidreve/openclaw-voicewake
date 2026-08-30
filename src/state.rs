@@ -60,6 +60,10 @@ impl State {
 pub enum StateError {
     #[error("Ungültiger Zustandsübergang: {from} -> {to}")]
     InvalidTransition { from: State, to: State },
+    #[error(
+        "Sicherheitskritische Operation im falschen Zustand aufgerufen: erwartet {expected}, tatsächlich {actual}"
+    )]
+    WrongState { expected: State, actual: State },
 }
 
 pub struct StateMachine {
@@ -86,6 +90,24 @@ impl StateMachine {
         }
         info!(from = %self.current, to = %to, "Zustandswechsel");
         self.current = to;
+        Ok(())
+    }
+
+    /// Bricht mit einem klaren Fehler ab, wenn der aktuelle Zustand nicht
+    /// `expected` ist. Echo-/Doppeltrigger-Schutz für sicherheitskritische
+    /// Operationen (Wake-Word-Lauschen, TTS-Wiedergabe): die passende
+    /// `transition()` davor reicht als Konvention nicht - ein künftiger
+    /// Refactor könnte die Reihenfolge versehentlich durcheinanderbringen
+    /// und z. B. die eigene TTS-Ausgabe erneut als Wake-Word einlesen
+    /// lassen. `require()` macht den Zustand zur tatsächlichen Bedingung
+    /// statt nur zur Beobachtung.
+    pub fn require(&self, expected: State) -> Result<(), StateError> {
+        if self.current != expected {
+            return Err(StateError::WrongState {
+                expected,
+                actual: self.current,
+            });
+        }
         Ok(())
     }
 }
@@ -172,6 +194,30 @@ mod tests {
 
         assert!(sm.transition(Recording).is_ok());
         assert_eq!(sm.current(), Recording);
+    }
+
+    #[test]
+    fn require_accepts_the_matching_current_state() {
+        let mut sm = StateMachine::new();
+        sm.transition(ListeningForWakeword).unwrap();
+        assert!(sm.require(ListeningForWakeword).is_ok());
+    }
+
+    /// Regression: Wake-Word-Lauschen und TTS-Wiedergabe hingen bisher nur
+    /// über die Aufrufreihenfolge in main.rs am richtigen Zustand, nicht
+    /// über eine tatsächliche Prüfung - ein Refactor-Fehler hätte sie
+    /// unbemerkt aus dem falschen Zustand heraus starten können.
+    #[test]
+    fn require_rejects_a_mismatching_current_state() {
+        let sm = StateMachine::new();
+        let err = sm.require(Recording).unwrap_err();
+        assert!(matches!(
+            err,
+            StateError::WrongState {
+                expected: Recording,
+                actual: Idle,
+            }
+        ));
     }
 
     #[test]
