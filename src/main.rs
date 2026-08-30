@@ -21,7 +21,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -67,6 +67,9 @@ async fn main() -> Result<()> {
     info!(dry_run = cli.dry_run, "openclaw-voicebridge gestartet");
 
     let mut sm = StateMachine::new();
+    // Persistiert über alle Zyklen hinweg, genau wie `sm` - bestimmt, wann
+    // vor der nächsten OpenClaw-Nachricht ein Session-Reset fällig ist.
+    let mut last_openclaw_message_at: Option<Instant> = None;
 
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -74,7 +77,15 @@ async fn main() -> Result<()> {
             break;
         }
 
-        if let Err(e) = run_cycle(&cfg, &cli, &mut sm, &shutdown).await {
+        if let Err(e) = run_cycle(
+            &cfg,
+            &cli,
+            &mut sm,
+            &shutdown,
+            &mut last_openclaw_message_at,
+        )
+        .await
+        {
             if e.is::<ShutdownRequested>() {
                 // Kein Fehler, sondern ein angeforderter Abbruch - weder
                 // Fehlerton noch `error!`-Log dafür, die äußere Schleife
@@ -191,9 +202,10 @@ async fn run_cycle(
     cli: &Cli,
     sm: &mut StateMachine,
     shutdown: &Arc<AtomicBool>,
+    last_openclaw_message_at: &mut Option<Instant>,
 ) -> Result<()> {
     let tmp_dir = make_temp_dir(cfg)?;
-    let result = run_cycle_inner(cfg, cli, sm, shutdown, &tmp_dir).await;
+    let result = run_cycle_inner(cfg, cli, sm, shutdown, &tmp_dir, last_openclaw_message_at).await;
     cleanup_temp_dir(&tmp_dir);
     result
 }
@@ -204,6 +216,7 @@ async fn run_cycle_inner(
     sm: &mut StateMachine,
     shutdown: &Arc<AtomicBool>,
     tmp_dir: &Path,
+    last_openclaw_message_at: &mut Option<Instant>,
 ) -> Result<()> {
     sm.transition(State::ListeningForWakeword)?;
     if cli.dry_run {
@@ -248,7 +261,9 @@ async fn run_cycle_inner(
         // Wake-Word oder von der vorigen Runde ausgelöst wurde. Der einzige
         // Unterschied zwischen "erste Runde" und "Folgerunde" ist der
         // Auslöser hier drumherum, nicht ihr Ablauf.
-        if run_round(cfg, cli, sm, tmp_dir, shutdown).await? == RoundOutcome::Closed {
+        if run_round(cfg, cli, sm, tmp_dir, shutdown, last_openclaw_message_at).await?
+            == RoundOutcome::Closed
+        {
             sm.transition(State::Idle)?;
             return Ok(());
         }
@@ -298,6 +313,7 @@ async fn run_round(
     sm: &mut StateMachine,
     tmp_dir: &Path,
     shutdown: &AtomicBool,
+    last_openclaw_message_at: &mut Option<Instant>,
 ) -> Result<RoundOutcome> {
     sm.transition(State::Recording)?;
     let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
@@ -389,13 +405,28 @@ async fn run_round(
         warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
         String::new()
     } else {
+        // Nicht kritisch für die Runde: Schlägt der Reset fehl, wird trotzdem
+        // ganz normal mit der eigentlichen Nachricht weitergemacht - ein
+        // Reset-Fehlschlag soll keine sonst funktionierende Runde abbrechen.
+        if let Err(e) = cancellable(
+            shutdown,
+            openclaw::maybe_reset_session(&cfg.openclaw, *last_openclaw_message_at),
+        )
+        .await
+        {
+            warn!(error = %e, "Session-Reset fehlgeschlagen - fahre trotzdem fort");
+        }
+
         match cancellable(
             shutdown,
             openclaw::send_to_openclaw(&cfg.openclaw, &transcript),
         )
         .await
         {
-            Ok(r) => r,
+            Ok(r) => {
+                *last_openclaw_message_at = Some(Instant::now());
+                r
+            }
             Err(e) => {
                 transcript_log::log_output(
                     &cfg.transcription_log,

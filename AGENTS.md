@@ -167,6 +167,14 @@ werden direkt nach Gebrauch gelöscht, nicht erst am Zyklusende.
 gesendet"; Basso = Fehler. Keine weiteren, gleich klingenden Töne
 hinzufügen - das Ausbleiben eines Tons ist selbst ein Signal.
 
+**Steuernachrichten an OpenClaw (z. B. der Session-Reset) laufen NICHT
+durch `message_template`.** Der Umschlag ist für Transkript-Formregeln
+gedacht ("gut vorlesbare Sätze, keine Emojis") - eine Steuernachricht wie
+`/new` darin einzupacken würde beim CLI nie als das erkannte Kommando
+ankommen, sondern als dessen Text verpackt in der Formregel.
+`openclaw::send_raw_to_openclaw` setzt `{message}` deshalb direkt, ohne
+`render_message`.
+
 ## Konfiguration
 
 **Alles, was ohne Neukompilierung änderbar ist und je nach Setup andere

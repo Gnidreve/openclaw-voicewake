@@ -207,6 +207,14 @@ pub struct OpenClawConfig {
     /// in die Konfiguration, nicht in kompilierten Code.
     pub message_template: String,
     pub timeout_secs: u64,
+    /// Nach so vielen Sekunden ohne eine an OpenClaw gesendete Nachricht wird
+    /// vor der nächsten Nachricht erst `session_reset_message` geschickt, um
+    /// eine neue Session zu erzwingen - eine nach langer Pause fortgesetzte
+    /// alte Session brächte sonst stark veralteten Kontext mit ein. `0`
+    /// schaltet den Reset ab.
+    pub session_reset_after_secs: u64,
+    /// Nachricht, die für den Session-Reset an OpenClaw geschickt wird.
+    pub session_reset_message: String,
 }
 impl Default for OpenClawConfig {
     fn default() -> Self {
@@ -221,6 +229,8 @@ impl Default for OpenClawConfig {
             // Formregel will, setzt sie bewusst in der eigenen Konfiguration.
             message_template: "{transcript}".to_string(),
             timeout_secs: 30,
+            session_reset_after_secs: 3600,
+            session_reset_message: "/new".to_string(),
         }
     }
 }

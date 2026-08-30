@@ -122,6 +122,14 @@ args = ["--channel", "{channel}", "--message", "{message}"]
 # gehört hierher und nicht in kompilierten Code.
 message_template = "{transcript}"
 timeout_secs = 30
+# Ist seit der letzten an OpenClaw gesendeten Nachricht so viel Zeit vergangen,
+# wird vor der nächsten Nachricht erst session_reset_message geschickt, um
+# eine neue Session zu erzwingen - eine nach langer Pause fortgesetzte alte
+# Session brächte sonst stark veralteten Kontext mit ein. 0 = Reset aus.
+session_reset_after_secs = 3600
+# Wird unverändert (ohne message_template-Umschlag) als eigenständige
+# Nachricht geschickt.
+session_reset_message = "/new"
 
 # Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:
 # binary = "/opt/homebrew/bin/openclaw"

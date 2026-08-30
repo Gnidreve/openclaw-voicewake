@@ -22,7 +22,6 @@ Läuft weiter, bis der Umstieg auf 0.2.x sauber möglich ist.
 
 | Version | Thema |
 |---|---|
-| 0.1.12 | OpenClaw-Session-Reset nach Inaktivität (Schwelle und Mechanismus noch offen) |
 | 0.1.13 | Ton für `[Output] skipped` (Kandidat: der bestehende Fehlerton) - abgeschickt, aber keine Antwort erhalten, bleibt sonst akustisch unbemerkt |
 | 0.1.14 | Verbleibende Lücken in Config-/Adapter-Validierung schließen, Fehlerausgaben nicht verschlucken |
 

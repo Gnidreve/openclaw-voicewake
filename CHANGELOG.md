@@ -14,6 +14,19 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-30
+
+### Hinzugefügt
+
+- OpenClaw-Session-Reset nach Inaktivität
+  (`openclaw.session_reset_after_secs`, `openclaw.session_reset_message`):
+  Ist seit der letzten an OpenClaw gesendeten Nachricht mehr als die
+  konfigurierte Zeit vergangen, wird vor der nächsten Nachricht erst die
+  Reset-Nachricht (Standard `/new`) verschickt, um eine neue Session zu
+  erzwingen - eine nach langer Pause fortgesetzte alte Session brächte
+  sonst stark veralteten Kontext mit ein. `0` schaltet den Reset ab. Ein
+  Fehlschlag beim Reset selbst bricht die laufende Runde nicht ab.
+
 ## [0.1.11] - 2026-08-30
 
 ### Hinzugefügt
@@ -363,7 +376,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...v0.1.9
