@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AudioConfig {
     /// Name des CoreAudio-Eingabegeräts. `None` = Systemstandard.
     pub device: Option<String>,
@@ -24,7 +24,7 @@ impl Default for AudioConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WakeWordConfig {
     /// Lokal laufendes, konfigurierbares Kommando zur Wake-Word-Erkennung.
     /// Muss bei Erkennung eine Zeile ausgeben, die `trigger_pattern` enthält.
@@ -48,7 +48,7 @@ impl Default for WakeWordConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct VadConfig {
     /// Stille, nach der die Aufnahme endet - gilt ab dem ersten Frame, also
     /// auch dann, wenn nie jemand gesprochen hat. Sprechen setzt die Uhr
@@ -83,7 +83,7 @@ impl Default for VadConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ConversationConfig {
     /// Wie viele Folgeeingaben nach einer vorgelesenen Antwort ohne erneutes
     /// Wake-Word möglich sind. Begrenzt den offenen Kanal, damit
@@ -101,7 +101,7 @@ impl Default for ConversationConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TranscriptFilterConfig {
     /// Transkripte, die eines dieser Muster enthalten, werden wie "keine
     /// Sprache" behandelt: kein OpenClaw-Aufruf, Kanal wird geschlossen.
@@ -132,7 +132,7 @@ impl Default for TranscriptFilterConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WhisperConfig {
     pub binary: String,
     pub model_path: PathBuf,
@@ -155,7 +155,7 @@ impl Default for WhisperConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct OpenClawConfig {
     pub binary: String,
     /// Zielkanal/Agent bzw. Session-Key. MUSS explizit gesetzt werden - kein
@@ -193,7 +193,7 @@ impl Default for OpenClawConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TtsConfig {
     /// Auszuführendes Programm. Muss nicht Piper selbst sein - bei einer
     /// venv-Installation steht hier das Python des venv, und `-m piper`
@@ -229,7 +229,7 @@ impl Default for TtsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SoundConfig {
     /// Bestätigungstöne bei Aufnahme-Start/-Ende an/aus.
     pub enabled: bool,
@@ -255,7 +255,7 @@ impl Default for SoundConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TranscriptionLogConfig {
     /// Chat-artiges Log ("[Input] ..." / "[Output] ...") an/aus.
     pub enabled: bool,
@@ -272,7 +272,7 @@ impl Default for TranscriptionLogConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GeneralConfig {
     pub ffmpeg_binary: String,
     pub temp_dir: Option<PathBuf>,
@@ -298,7 +298,7 @@ impl GeneralConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub audio: AudioConfig,
     pub wakeword: WakeWordConfig,
@@ -489,6 +489,26 @@ mod tests {
             GeneralConfig::default().temp_base(),
             std::env::temp_dir(),
             "ohne temp_dir gilt das Systemtemp-Verzeichnis"
+        );
+    }
+
+    /// Regression: Ohne `deny_unknown_fields` wurde ein unbekanntes Feld
+    /// (Tippfehler oder ein Feldname aus einer alten Config-Version, z. B.
+    /// `piper_binary`/`model_path`/`extra_args` aus vor-0.1.x-Configs)
+    /// stillschweigend ignoriert - das betroffene Feld fiel dann unbemerkt
+    /// auf seinen Default zurück statt dass das Laden fehlschlägt.
+    #[test]
+    fn unknown_field_is_rejected_instead_of_silently_falling_back_to_defaults() {
+        let raw = r#"
+            [tts]
+            piper_binary = "/pfad/zur/venv-python"
+            model_path = "/models/thorsten.onnx"
+            extra_args = ["--foo"]
+        "#;
+        let err = toml::from_str::<Config>(raw).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field"),
+            "unerwartete Fehlermeldung: {err}"
         );
     }
 
