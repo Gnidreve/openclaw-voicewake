@@ -37,6 +37,10 @@ Zwei Workflows, eine Abhängigkeit:
   der Konvention nach. Ohne grüne Tests kein Build, unabhängig davon, ob
   der Workflow durch Push nach `main`, einen Tag, ein veröffentlichtes
   Release oder `workflow_dispatch` ausgelöst wurde.
+- Beide Workflows tragen `paths-ignore: ['**/*.md']` auf ihrem jeweiligen
+  Trigger: reine Doku-Änderungen (egal wie tief verschachtelt) laufen
+  weder durch den Test-Pflicht-Check noch beschäftigen sie unnötig den
+  macOS-Runner.
 
 ## Release
 
