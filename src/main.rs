@@ -1,6 +1,8 @@
 mod audio;
 mod child_process;
 mod config;
+mod device_identity;
+mod gateway_client;
 mod instance_lock;
 mod openclaw;
 mod sound;
@@ -49,7 +51,17 @@ async fn main() -> Result<()> {
 
     init_logging(cli.log_level.as_deref().unwrap_or(&cfg.general.log_level));
 
-    cfg.validate(cli.dry_run)?;
+    // `--probe-gateway` braucht wie `--dry-run` kein vorhandenes
+    // Whisper-Modell - beides sind Diagnose-/Simulationswege, die nie
+    // transkribieren.
+    cfg.validate(cli.dry_run || cli.probe_gateway)?;
+
+    // Reines Diagnose-Werkzeug: fasst weder Mikrofon noch Wake-Word-Listener
+    // an, deshalb bewusst vor der Einzelinstanz-Sperre und ohne sie - ein
+    // parallel laufender echter Zyklus wird dadurch nicht gestört.
+    if cli.probe_gateway {
+        return gateway_client::run_read_only_probe(&cfg).await;
+    }
 
     if cli.dry_run && cli.dry_run_file.is_none() {
         warn!("Dry-Run ohne --dry-run-file: die Aufnahme kann nicht simuliert werden");

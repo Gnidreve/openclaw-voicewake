@@ -30,23 +30,6 @@ Transport-Wahl **ausschließlich über Config**, kein CLI-Flag dafür:
 transport = "cli"  # oder "websocket" - Default "cli", bestehende Configs laufen unverändert weiter
 ```
 
-### 0.2.0 - Read-only Streaming-Prototyp
-
-Recherchierter Weg (Gateway-Doku + installierte Implementierung geprüft,
-nichts am Gateway verändert oder neu gestartet):
-
-1. Verbindung zu `ws://127.0.0.1:18789` (Gateway läuft lokal auf Loopback).
-2. `connect`-Handshake als lokaler Operator mit passenden Scopes.
-3. `sessions.messages.subscribe` für den konfigurierten Zielkanal.
-4. Events zunächst nur protokollieren, noch kein Audio/Piper daran:
-   `chat` (mit `deltaText` und später `final`), `session.message`,
-   `session.operation`, `session.tool`.
-
-**Bewusst rein lesend:** `chat.send` (aktives Auslösen einer Antwort über
-den WebSocket) kommt erst in 0.2.1. Hier wird nur beobachtet, was das
-Gateway an Events liefert - ausgelöst z. B. durch eine parallel laufende
-CLI-Nutzung derselben Session, nicht durch diesen Prototyp selbst.
-
 ### 0.2.1 - Volle Integration
 
 - `transport = "websocket"` nutzt `chat.send` statt `openclaw agent --json`
