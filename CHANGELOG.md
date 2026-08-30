@@ -14,6 +14,27 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-30
+
+### Behoben
+
+- Nach 0.2.3 lief die Aufnahme wieder korrekt (VAD erkannte echte Sprache
+  richtig), aber die Antwort kam bei tatsächlich gesprochenem Text nicht
+  durch: die Pipeline hing nach jeder Runde mit erkannter Sprache bei
+  "Normalisiere Audio mit ffmpeg" fest, bis zum Timeout. Ursache: Ohne
+  `-nostdin` versucht ffmpeg, das geerbte stdin (bei einer aus Terminal.app
+  gestarteten Bridge: ein echtes TTY) für Tastatureingaben zu konfigurieren
+  (`term_init` -> `tcsetattr`). In Kombination mit der Prozessgruppen-
+  Isolation aus `spawn_isolated` (siehe 0.2.3) blockiert dieser
+  `tcsetattr`-Aufruf auf macOS unbegrenzt, statt regulär mit `SIGTTOU`
+  gestoppt zu werden. `build_ffmpeg_args` in `transcribe.rs` setzt jetzt
+  `-nostdin`, wodurch ffmpeg den TTY-Zugriff von vornherein unterlässt -
+  unabhängig von Prozessgruppe oder geerbtem stdin. Ein
+  Shell-Workaround (Bridge mit `< /dev/null` starten) wird dadurch
+  überflüssig; er hatte im Feldtest zudem die echte Spracherkennung
+  komplett lahmgelegt (jede Aufnahme wurde als Stille eingestuft) und ist
+  deshalb keine Alternative zu diesem Fix.
+
 ## [0.2.3] - 2026-08-30
 
 ### Behoben
@@ -496,7 +517,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...v0.2.1

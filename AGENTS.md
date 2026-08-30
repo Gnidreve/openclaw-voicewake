@@ -143,6 +143,23 @@ nicht in eine eigene Prozessgruppe darf. Vor einer erneuten Umstellung auf
 `spawn_isolated` an dieser Stelle: auf echter Hardware gegenprüfen, ob das
 Mikrofon danach noch funktioniert.
 
+**Jeder ffmpeg-Aufruf braucht `-nostdin`.** Zweite Regression aus derselben
+Familie wie die vorige (0.2.4-Feldtest, direkt nach dem 0.2.3-Fix
+aufgefallen): Ohne `-nostdin` versucht ffmpeg, sein geerbtes stdin - bei
+einer aus Terminal.app gestarteten Bridge ein echtes TTY - für
+Tastatureingaben zu konfigurieren (`term_init` -> `tcsetattr`). In
+Kombination mit `spawn_isolated`s eigener Prozessgruppe blockiert dieser
+`tcsetattr`-Aufruf auf macOS unbegrenzt (`SIGTTOU` wird nicht regulär
+zugestellt), statt den Prozess nur zu stoppen - die Normalisierung in
+`transcribe.rs` hing dadurch nach *jeder* Runde mit tatsächlich erkannter
+Sprache fest, bis zum Timeout. `build_ffmpeg_args` setzt `-nostdin` deshalb
+fest, nicht optional. **Kein Workaround über die Shell** (z. B. die Bridge
+mit `< /dev/null` starten) - das hat im Feldtest zusätzlich die
+Spracherkennung selbst kaputt gemacht (jede Aufnahme wurde als Stille
+eingestuft), vermutlich weil der Wake-Word-Prozess (siehe vorige
+Invariante) stdin ungefiltert vom Elternprozess erbt. Ein neuer ffmpeg-
+Aufrufer an anderer Stelle im Projekt braucht denselben Fix.
+
 **Der Rauschboden wird bei jedem Frame nachgeführt, nie nur bei "Stille".**
 Läge die Umgebungslautstärke schon zu Beginn über der Anfangsschwelle,
 würde ein Update ausschließlich bei "Stille" eingestuften Frames nie
