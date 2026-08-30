@@ -4,8 +4,8 @@
 //! in `device_identity.rs` implementierten Ed25519-Signaturvertrag an und
 //! abonniert die Transkript-/Nachrichtenereignisse des konfigurierten
 //! Zielkanals. Bewusst rein lesend: `chat.send` (aktives Auslösen einer
-//! Antwort) kommt erst in 0.2.1 - hier wird nur protokolliert, was das
-//! Gateway an Events liefert.
+//! Antwort) kommt erst in einer späteren Version - hier wird nur
+//! protokolliert, was das Gateway an Events liefert.
 //!
 //! Frame-Formen und Methodennamen sind gegen den tatsächlichen
 //! OpenClaw-Quellcode geprüft (nicht nur gegen die Doku):
@@ -13,6 +13,15 @@
 //!   - `src/gateway/server-methods/sessions-subscriptions.ts`
 //!     (`sessions.messages.subscribe` erwartet `params.key`, nicht
 //!     `sessionKey` o. Ä.)
+//!   - `packages/gateway-protocol/src/client-info.ts` (`GATEWAY_CLIENT_IDS`/
+//!     `GATEWAY_CLIENT_MODES`): `client.id`/`client.mode` sind geschlossene
+//!     Enums, keine freien Strings - ein selbst erfundener Wert wie das
+//!     ursprüngliche `"openclaw-voicebridge"`/`"operator"` wird vom Gateway
+//!     mit `INVALID_REQUEST` abgelehnt, bevor überhaupt die Geräte-Signatur
+//!     geprüft wird. `"operator"` ist nur für das separate `role`-Feld
+//!     gültig (eigenes, unabhängiges Enum `{"operator","node"}`) - nicht für
+//!     `client.mode`. `openclaw-probe`/`probe` ist der für einen
+//!     Diagnose-Client wie `--probe-gateway` vorgesehene Eintrag.
 
 use anyhow::{bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -26,13 +35,21 @@ use tracing::{debug, info, warn};
 use crate::config::{Config, OpenClawConfig};
 use crate::device_identity::{build_device_auth_payload_v3, DeviceIdentity, V3PayloadParams};
 
-/// Scopes, die für den read-only Prototyp UND das in 0.2.1 geplante
+/// Scopes, die für den read-only Prototyp UND das später geplante
 /// `chat.send` ausreichen (siehe `docs/gateway/clients`, Abschnitt "Bereiche
-/// auswählen") - einmal angefordert, damit eine spätere Umstellung auf
-/// 0.2.1 keinen erneuten Kopplungs-Vorgang mit anderen Scopes auslöst.
+/// auswählen") - einmal angefordert, damit eine spätere volle Integration
+/// keinen erneuten Kopplungs-Vorgang mit anderen Scopes auslöst.
 const REQUESTED_SCOPES: &[&str] = &["operator.read", "operator.write"];
-const CLIENT_ID: &str = "openclaw-voicebridge";
-const CLIENT_MODE: &str = "operator";
+/// Muss ein Wert aus `GATEWAY_CLIENT_IDS` in
+/// `packages/gateway-protocol/src/client-info.ts` sein - geschlossenes Enum,
+/// keine freie Kennung. `openclaw-probe` ist der dort für Diagnose-Clients
+/// vorgesehene Eintrag.
+const CLIENT_ID: &str = "openclaw-probe";
+/// Muss ein Wert aus `GATEWAY_CLIENT_MODES` in derselben Datei sein - ein
+/// eigenes, geschlossenes Enum, NICHT dasselbe wie `role` weiter unten.
+const CLIENT_MODE: &str = "probe";
+/// Muss `"operator"` oder `"node"` sein (`GATEWAY_ROLES` in
+/// `src/gateway/role-policy.ts`) - unabhängig vom `client.mode`-Enum oben.
 const ROLE: &str = "operator";
 
 /// Events, über die der Prototyp laut Roadmap berichten soll. Alles andere
@@ -398,14 +415,61 @@ mod tests {
         assert_eq!(req["params"]["minProtocol"], 4);
         assert_eq!(req["params"]["maxProtocol"], 4);
         assert_eq!(req["params"]["role"], "operator");
-        assert_eq!(req["params"]["client"]["id"], "openclaw-voicebridge");
-        assert_eq!(req["params"]["client"]["mode"], "operator");
+        assert_eq!(req["params"]["client"]["id"], "openclaw-probe");
+        assert_eq!(req["params"]["client"]["mode"], "probe");
         assert_eq!(
             req["params"]["scopes"],
             json!(["operator.read", "operator.write"])
         );
         assert_eq!(req["params"]["device"]["nonce"], "test-nonce");
         assert_eq!(req["params"]["device"]["signedAt"], 1_700_000_000_000i64);
+    }
+
+    /// Regression: `client.id`/`client.mode` sind vom Gateway als geschlossene
+    /// Enums validiert (`GATEWAY_CLIENT_IDS`/`GATEWAY_CLIENT_MODES` in
+    /// `packages/gateway-protocol/src/client-info.ts`), keine freien Strings.
+    /// Ein selbst erfundener Wert wie das ursprüngliche
+    /// `"openclaw-voicebridge"`/`"operator"` wurde vom Gateway mit
+    /// `INVALID_REQUEST` abgelehnt, noch bevor die Geräte-Signatur geprüft
+    /// wurde - das fiel nur gegen ein echtes Gateway auf, nicht hier. Diese
+    /// Liste ist der Stand der beiden Enums zum Zeitpunkt dieses Fixes;
+    /// stimmt sie nicht mehr mit dem tatsächlichen OpenClaw-Quellcode
+    /// überein, muss sie erneut abgeglichen werden.
+    #[test]
+    fn client_id_and_mode_are_in_the_gateways_closed_enums() {
+        const KNOWN_GOOD_CLIENT_IDS: &[&str] = &[
+            "webchat-ui",
+            "openclaw-control-ui",
+            "openclaw-browser-copilot",
+            "openclaw-tui",
+            "webchat",
+            "cli",
+            "gateway-client",
+            "openclaw-macos",
+            "openclaw-linux",
+            "openclaw-ios",
+            "openclaw-watchos",
+            "openclaw-android",
+            "node-host",
+            "openclaw-worker",
+            "test",
+            "fingerprint",
+            "openclaw-probe",
+        ];
+        const KNOWN_GOOD_CLIENT_MODES: &[&str] = &[
+            "webchat", "cli", "ui", "backend", "node", "worker", "probe", "test",
+        ];
+        assert!(
+            KNOWN_GOOD_CLIENT_IDS.contains(&CLIENT_ID),
+            "CLIENT_ID {CLIENT_ID:?} ist kein bekannter Wert aus GATEWAY_CLIENT_IDS"
+        );
+        assert!(
+            KNOWN_GOOD_CLIENT_MODES.contains(&CLIENT_MODE),
+            "CLIENT_MODE {CLIENT_MODE:?} ist kein bekannter Wert aus GATEWAY_CLIENT_MODES"
+        );
+        // Die beiden Enums sind unabhängig - "operator" ist z. B. für `role`
+        // gültig, aber für keines der beiden hier.
+        assert!(!KNOWN_GOOD_CLIENT_MODES.contains(&"operator"));
     }
 
     #[test]

@@ -14,6 +14,27 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-30
+
+### Behoben
+
+- Der Gateway-Connect-Request aus 0.2.0 wurde von jedem echten Gateway mit
+  `INVALID_REQUEST` abgelehnt, noch bevor die Geräte-Signatur geprüft wurde:
+  `client.id`/`client.mode` sind beim Gateway geschlossene Enums
+  (`GATEWAY_CLIENT_IDS`/`GATEWAY_CLIENT_MODES`), keine freien Strings. Der
+  gesendete `client.id = "openclaw-voicebridge"` existierte in diesem Enum
+  nicht, und `client.mode = "operator"` war eine Verwechslung mit dem
+  separaten, unabhängigen `role`-Feld (dort ist `"operator"` korrekt) - im
+  Protokoll-Doku-Beispiel stehen `client.mode` und `role` nebeneinander mit
+  identischem Wert, was diese Verwechslung nahelegt, ohne dass es im
+  tatsächlichen Schema stimmt. `--probe-gateway` funktionierte deshalb
+  gegen kein einziges reales Gateway (weder stabil 2026.7.x noch aktuelle
+  Betas), nur gegen den eigenen Mock-Server im Test - der denselben
+  (falschen) Wert unkritisch akzeptierte. `client.id`/`client.mode` sind
+  jetzt `"openclaw-probe"`/`"probe"` (der für Diagnose-Clients vorgesehene
+  Eintrag im Gateway-eigenen Enum), plus ein Regressionstest, der beide
+  Konstanten gegen den zuletzt geprüften Stand der Enums verankert.
+
 ## [0.2.0] - 2026-08-30
 
 ### Hinzugefügt
@@ -431,7 +452,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...v0.2.0
 [0.1.14]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...v0.1.13
