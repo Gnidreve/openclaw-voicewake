@@ -18,6 +18,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// Der Einzelinstanz-Sperrpfad ist bewusst fest und nicht konfigurierbar
+/// (siehe `AGENTS.md#invarianten`) - zwei gleichzeitig gestartete Binaries
+/// aus diesem Testfile würden sich damit sonst gegenseitig die Sperre
+/// wegnehmen. Serialisiert die Prozessstarts in diesem Testfile.
+static SEQUENTIAL_BINARY_RUNS: Mutex<()> = Mutex::new(());
 
 #[cfg(unix)]
 fn write_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -109,6 +116,13 @@ printf 'Wie spaet ist es?\n' > "$of.txt"
 /// Stub für die Tonwiedergabe: tut nichts, meldet aber Erfolg.
 const PLAYER_STUB: &str = "#!/bin/sh\nexit 0\n";
 
+/// Stub für das OpenClaw-CLI, das erfolgreich antwortet, aber mit leerem
+/// Antworttext - der Fall, den `[Output] skipped` (nach abgeschicktem
+/// Transkript) abdeckt.
+const OPENCLAW_EMPTY_RESPONSE_STUB: &str = r#"#!/bin/sh
+printf '{"result":{"payloads":[{"text":""}]}}\n'
+"#;
+
 #[cfg(unix)]
 #[test]
 fn full_round_runs_against_stubbed_tools() {
@@ -181,17 +195,20 @@ path = "{chat_log}"
     )
     .expect("Konfiguration schreiben");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_openclaw-voicebridge"))
-        .args([
-            "--config",
-            config.to_str().unwrap(),
-            "--dry-run",
-            "--dry-run-file",
-            sample.to_str().unwrap(),
-            "--once",
-        ])
-        .output()
-        .expect("Bridge starten");
+    let output = {
+        let _guard = SEQUENTIAL_BINARY_RUNS.lock().unwrap();
+        Command::new(env!("CARGO_BIN_EXE_openclaw-voicebridge"))
+            .args([
+                "--config",
+                config.to_str().unwrap(),
+                "--dry-run",
+                "--dry-run-file",
+                sample.to_str().unwrap(),
+                "--once",
+            ])
+            .output()
+            .expect("Bridge starten")
+    };
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let log = std::fs::read_to_string(&chat_log).unwrap_or_default();
@@ -212,5 +229,111 @@ path = "{chat_log}"
     assert!(
         !stderr.contains("exit: 3") && !stderr.contains("erwartet"),
         "ein Stub hat die Aufrufform bemängelt:\n{stderr}"
+    );
+}
+
+/// Regression für 0.1.13: Wurde ein Transkript abgeschickt, aber keine
+/// Antwort erhalten (`[Output] skipped`), blieb das bisher komplett
+/// unbemerkt - anders als bei "nichts erkannt" (dort ist das Schweigen
+/// selbst das Signal) ist hier tatsächlich etwas fehlgeschlagen. Prüft,
+/// dass in genau diesem Fall der Fehlerton gespielt wird.
+#[cfg(unix)]
+#[test]
+fn empty_response_after_a_sent_transcript_plays_the_error_chime() {
+    let dir = std::env::temp_dir().join(format!("voicebridge-skipped-{}", uuid::Uuid::new_v4()));
+    let bin_dir = dir.join("bin");
+    std::fs::create_dir_all(&bin_dir).expect("Testverzeichnis anlegen");
+
+    let openclaw = write_stub(&bin_dir, "openclaw-stub", OPENCLAW_EMPTY_RESPONSE_STUB);
+    let ffmpeg = write_stub(&bin_dir, "ffmpeg-stub", FFMPEG_STUB);
+    let whisper = write_stub(&bin_dir, "whisper-stub", WHISPER_STUB);
+
+    let played_log = dir.join("played.log");
+    let player_stub = format!(
+        "#!/bin/sh\necho \"$1\" >> \"{}\"\nexit 0\n",
+        played_log.display()
+    );
+    let player = write_stub(&bin_dir, "player-stub", &player_stub);
+
+    let model = dir.join("model.bin");
+    std::fs::write(&model, b"").expect("Modell-Platzhalter schreiben");
+    let sample = dir.join("sample.wav");
+    std::fs::write(&sample, b"RIFF").expect("Beispieldatei schreiben");
+
+    let chat_log = dir.join("chat.log");
+    let chime_path = dir.join("glass-marker");
+    let error_chime_path = dir.join("basso-marker");
+    let config = dir.join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+[openclaw]
+binary = "{openclaw}"
+target_channel = "voice-assistant"
+args = ["--channel", "{{channel}}", "--message", "{{message}}"]
+
+[whisper]
+binary = "{whisper}"
+model_path = "{model}"
+
+[sound]
+enabled = true
+chime_path = "{chime_path}"
+error_chime_path = "{error_chime_path}"
+player_binary = "{player}"
+
+[general]
+ffmpeg_binary = "{ffmpeg}"
+temp_dir = "{tmp}"
+
+[transcription_log]
+path = "{chat_log}"
+"#,
+            openclaw = openclaw.display(),
+            whisper = whisper.display(),
+            model = model.display(),
+            chime_path = chime_path.display(),
+            error_chime_path = error_chime_path.display(),
+            player = player.display(),
+            ffmpeg = ffmpeg.display(),
+            tmp = dir.display(),
+            chat_log = chat_log.display(),
+        ),
+    )
+    .expect("Konfiguration schreiben");
+
+    let output = {
+        let _guard = SEQUENTIAL_BINARY_RUNS.lock().unwrap();
+        Command::new(env!("CARGO_BIN_EXE_openclaw-voicebridge"))
+            .args([
+                "--config",
+                config.to_str().unwrap(),
+                "--dry-run",
+                "--dry-run-file",
+                sample.to_str().unwrap(),
+                "--once",
+            ])
+            .output()
+            .expect("Bridge starten")
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let log = std::fs::read_to_string(&chat_log).unwrap_or_default();
+    let played = std::fs::read_to_string(&played_log).unwrap_or_default();
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        log.contains("[Output] skipped"),
+        "erwartet [Output] skipped im Log.\nLog:\n{log}\nstderr:\n{stderr}"
+    );
+    assert!(
+        played.contains("basso-marker"),
+        "Fehlerton wurde nicht abgespielt.\nAbgespielt:\n{played}\nstderr:\n{stderr}"
+    );
+    assert!(
+        !played.contains("glass-marker"),
+        "im Dry-Run darf kein Aufnahme-Bestätigungston laufen, nur der Fehlerton.\nAbgespielt:\n{played}"
     );
 }

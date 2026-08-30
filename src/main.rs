@@ -401,7 +401,11 @@ async fn run_round(
     };
 
     sm.transition(State::SendingToOpenClaw)?;
-    let response = if transcript.trim().is_empty() {
+    // Unterscheidet die beiden Wege in den "leere Antwort"-Zweig unten:
+    // gar nicht erst gesendet (nichts erkannt) vs. gesendet, aber ohne
+    // Antworttext zurückbekommen.
+    let sent_to_openclaw = !transcript.trim().is_empty();
+    let response = if !sent_to_openclaw {
         warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
         String::new()
     } else {
@@ -446,9 +450,18 @@ async fn run_round(
             transcript_log::OutputOutcome::Skipped,
         )
         .await;
-        // Bewusst ohne eigenen Ton: Wurde nichts erkannt, ist bereits der
-        // Absende-Ton ausgeblieben - ein zusätzlicher, gleich klingender
-        // Ton würde nur verwirren.
+        if sent_to_openclaw {
+            // Wurde etwas abgeschickt, aber keine Antwort erhalten, bliebe
+            // das sonst akustisch unbemerkt - anders als bei "nichts
+            // erkannt" (kein Ton, siehe unten) ist hier tatsächlich etwas
+            // fehlgeschlagen, auch ohne dass `send_to_openclaw` selbst einen
+            // Fehler zurückgab.
+            if let Err(e) = sound::play_error_chime(&cfg.sound).await {
+                warn!(error = %e, "Konnte Fehlerton nicht abspielen");
+            }
+        }
+        // Wurde nichts erkannt, ist bereits der Absende-Ton ausgeblieben -
+        // ein zusätzlicher, gleich klingender Ton würde nur verwirren.
         return Ok(RoundOutcome::Closed);
     }
 

@@ -164,8 +164,12 @@ werden direkt nach Gebrauch gelöscht, nicht erst am Zyklusende.
 
 **Töne bedeuten etwas.** Glass beim Start = "sprich"; Glass am Ende =
 "erkannt, wird gesendet"; kein Ton am Ende = "nichts erkannt, nichts
-gesendet"; Basso = Fehler. Keine weiteren, gleich klingenden Töne
-hinzufügen - das Ausbleiben eines Tons ist selbst ein Signal.
+gesendet"; Basso = Fehler - **auch** dann, wenn zwar erfolgreich etwas
+abgeschickt wurde, aber keine Antwort zurückkam (`[Output] skipped` nach
+gesendetem Transkript, unterschieden von `[Output] skipped` ohne
+Sendeversuch über `sent_to_openclaw` in `run_round`). Keine weiteren,
+gleich klingenden Töne hinzufügen - das Ausbleiben eines Tons ist selbst
+ein Signal.
 
 **Steuernachrichten an OpenClaw (z. B. der Session-Reset) laufen NICHT
 durch `message_template`.** Der Umschlag ist für Transkript-Formregeln
@@ -208,6 +212,11 @@ Zwei Konventionen:
 * Ein Test, der eine Aufrufform Argument für Argument festnagelt, ist
   Absicht: Er schlägt fehl, sobald eine Konfiguration ein früheres Skript
   nicht mehr ersetzen könnte.
+* Startet ein Test die echte Binary als Kindprozess (z. B.
+  `tests/pipeline_with_stubs.rs`), muss der eigentliche Programmstart durch
+  einen gemeinsamen `Mutex` serialisiert werden: Der Einzelinstanz-Sperrpfad
+  ist fest (siehe oben), zwei parallel gestartete Testprozesse würden sich
+  sonst gegenseitig die Sperre streitig machen.
 
 ## GitHub: Branches, PRs, CI, Release
 
