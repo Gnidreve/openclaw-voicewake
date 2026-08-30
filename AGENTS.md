@@ -75,6 +75,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
 | `tts.rs` | Piper-Aufruf, Wiedergabe |
+| `template.rs` | Platzhalter-Ersetzung in Argumentlisten (ein Durchlauf, nicht verkettet) |
 | `sound.rs` | Bestätigungs- und Fehlerton |
 | `instance_lock.rs` | Einzelinstanz-Sperre |
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
@@ -114,6 +115,18 @@ die Sperre mit zwei Konfigurationen auszuhebeln.
 `openclaw.args` Pflicht. Vorher setzte ein Adapter-Skript die Session fest
 und `target_channel` steuerte nichts - die Validierung bewachte einen Wert
 ohne Wirkung.
+
+**Ein unbekanntes Config-Feld ist ein Abbruch, kein Default.** Jede
+Config-Struct trägt `deny_unknown_fields`. Ohne das fiel ein Tippfehler oder
+ein alter Feldname (z. B. `piper_binary` statt `binary`) beim Laden
+stillschweigend auf den Default zurück - ein Bug, der nur beim ersten
+Sprechversuch auffiel, nicht beim Start.
+
+**Platzhalter werden in einem Durchlauf ersetzt, nie verkettet.**
+`template::substitute` scannt `openclaw.args`/`tts.args` einmal von links
+nach rechts. Zwei nacheinander ausgeführte `.replace()`-Aufrufe können einen
+bereits eingesetzten Wert (z. B. `target_channel`) erneut als Platzhalter
+interpretieren, wenn er zufällig dessen literalen Text enthält.
 
 **Der Transkript-Filter ist das letzte Netz, nicht die tragende Schicht.**
 Die Musterliste nicht ausbauen: Sie fängt bekannte Whisper-Halluzinationen
