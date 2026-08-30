@@ -4,6 +4,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{info, warn};
 
+use crate::child_process::spawn_isolated;
 use crate::config::WakeWordConfig;
 
 /// Startet den konfigurierten externen Wake-Word-Prozess und wartet, bis eine
@@ -26,7 +27,7 @@ pub async fn wait_for_wakeword(cfg: &WakeWordConfig) -> Result<()> {
 
     info!(command = %cfg.command, "Starte Wake-Word-Erkennung");
 
-    let mut child = cmd.spawn().with_context(|| {
+    let (mut child, _pg_guard) = spawn_isolated(&mut cmd).with_context(|| {
         format!(
             "Kann Wake-Word-Kommando nicht starten: '{}' (ist es installiert und im PATH?)",
             cfg.command

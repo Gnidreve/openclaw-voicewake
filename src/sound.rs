@@ -5,6 +5,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::info;
 
+use crate::child_process::spawn_isolated;
 use crate::config::SoundConfig;
 
 /// Spielt den konfigurierten Bestätigungston ab (Standard: macOS-Systemsound
@@ -36,8 +37,7 @@ async fn play(cfg: &SoundConfig, path: &Path, kind: &str) -> Result<()> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let child = cmd
-        .spawn()
+    let (child, _pg_guard) = spawn_isolated(&mut cmd)
         .with_context(|| format!("Kann Wiedergabeprogramm für {kind} nicht starten"))?;
     let out = timeout(
         Duration::from_secs(cfg.timeout_secs),

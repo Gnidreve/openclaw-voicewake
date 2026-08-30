@@ -14,6 +14,18 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-08-30
+
+### Hinzugefügt
+
+- Jeder Kindprozess (ffmpeg, whisper-cli, OpenClaw-CLI, Piper, Wiedergabe-
+  und Wake-Word-Kommando) läuft jetzt in einer eigenen Prozessgruppe
+  (`child_process::spawn_isolated`). `kill_on_drop` killt beim Drop nur
+  die direkte Kind-PID - startet ein Prozess selbst weitere Prozesse,
+  liefen die bei Timeout oder Shutdown-Abbruch bisher verwaist weiter. Ein
+  neuer `ProcessGroupGuard` killt beim Drop die komplette Gruppe; nach
+  regulärem Prozessende ist das ein wirkungsloser No-Op.
+
 ## [0.1.8] - 2026-08-30
 
 ### Hinzugefügt
@@ -321,7 +333,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...v0.1.6

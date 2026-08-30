@@ -5,6 +5,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 
+use crate::child_process::spawn_isolated;
 use crate::config::{GeneralConfig, WhisperConfig};
 
 /// Reine Argument-Konstruktion für ffmpeg, unabhängig testbar ohne Prozessstart.
@@ -42,7 +43,7 @@ pub async fn normalize_audio(
         // zu werden - der Prozess stirbt mit dem Drop des Child-Handles.
         .kill_on_drop(true);
 
-    let child = cmd.spawn().context("Kann ffmpeg nicht starten")?;
+    let (child, _pg_guard) = spawn_isolated(&mut cmd).context("Kann ffmpeg nicht starten")?;
     let out = timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
         .await
         .context("Timeout bei ffmpeg-Normalisierung")??;
@@ -91,7 +92,7 @@ pub async fn transcribe(cfg: &WhisperConfig, wav_path: &Path, tmp_dir: &Path) ->
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let child = cmd.spawn().context("Kann whisper-cli nicht starten")?;
+    let (child, _pg_guard) = spawn_isolated(&mut cmd).context("Kann whisper-cli nicht starten")?;
     let out = timeout(
         Duration::from_secs(cfg.timeout_secs),
         child.wait_with_output(),

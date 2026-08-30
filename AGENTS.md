@@ -78,6 +78,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `template.rs` | Platzhalter-Ersetzung in Argumentlisten (ein Durchlauf, nicht verkettet) |
 | `sound.rs` | Bestätigungs- und Fehlerton |
 | `instance_lock.rs` | Einzelinstanz-Sperre |
+| `child_process.rs` | Prozessgruppen-Guard gegen verwaiste Enkelprozesse |
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 
@@ -110,6 +111,14 @@ laute Frames über die ganze Aufnahme zu "Sprache".
 **Nur eine Instanz.** Der `flock`-Pfad ist bewusst nicht konfigurierbar und
 hängt nicht an `general.temp_dir` - jede Konfigurierbarkeit wäre ein Weg,
 die Sperre mit zwei Konfigurationen auszuhebeln.
+
+**Jeder Kindprozess läuft in seiner eigenen Prozessgruppe.**
+`child_process::spawn_isolated` statt `cmd.spawn()` direkt. `kill_on_drop`
+killt beim Drop nur die direkte Kind-PID; startet der Prozess selbst
+weitere Prozesse (denkbar beim OpenClaw-CLI), liefen die sonst bei Timeout
+oder Shutdown-Abbruch verwaist weiter. Der `ProcessGroupGuard` killt beim
+Drop die ganze Gruppe - nach regulärem Prozessende ein wirkungsloser
+No-Op.
 
 **Der Zielkanal muss das CLI erreichen.** `{channel}` ist in
 `openclaw.args` Pflicht. Vorher setzte ein Adapter-Skript die Session fest
