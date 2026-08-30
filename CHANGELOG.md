@@ -14,6 +14,26 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-08-30
+
+### Hinzugefügt
+
+- Config-Validierung: `wakeword.trigger_pattern` darf nicht leer sein (passt
+  sonst per Teilstring-Suche auf jede Ausgabezeile und löst die Wake-Word-
+  Erkennung sofort aus), `vad.frame_ms` muss größer 0 sein (sonst bliebe
+  `elapsed_ms` in der VAD für immer bei 0 stehen und weder
+  `silence_timeout_ms` noch `max_recording_seconds` könnten je ablaufen),
+  `openclaw.session_reset_message` darf nicht leer sein, solange
+  `session_reset_after_secs` den Reset aktiviert hat.
+
+### Geändert
+
+- Die stderr-Ausgabe des Wake-Word-Kommandos wird jetzt eingesammelt und bei
+  einem Fehlschlag (unerwartetes Prozessende) in die Fehlermeldung
+  übernommen, statt wie bisher komplett verworfen zu werden - "Wake-Word-
+  Prozess unerwartet beendet" allein sagte nichts über den Grund aus
+  (fehlendes Modell, Python-Traceback, Mikrofon belegt, ...).
+
 ## [0.1.13] - 2026-08-30
 
 ### Hinzugefügt
@@ -386,7 +406,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...v0.1.11
