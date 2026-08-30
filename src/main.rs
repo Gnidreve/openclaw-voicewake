@@ -209,6 +209,12 @@ async fn run_cycle_inner(
     if cli.dry_run {
         info!("[dry-run] Wake-Word wird simuliert erkannt");
     } else {
+        // Echo-/Doppeltrigger-Schutz: Wake-Word-Lauschen darf nur in genau
+        // diesem Zustand laufen, sonst könnte z. B. die eigene TTS-Ausgabe
+        // erneut als Wake-Word eingelesen werden. Die `transition()` direkt
+        // darüber sollte das schon garantieren - `require()` macht daraus
+        // eine tatsächliche Bedingung statt nur eine Konvention.
+        sm.require(State::ListeningForWakeword)?;
         tokio::select! {
             result = wakeword::wait_for_wakeword(&cfg.wakeword) => result?,
             _ = wait_for_shutdown(shutdown) => {
@@ -421,6 +427,11 @@ async fn run_round(
     // direkt weiter aufgenommen (record_until_silence markiert Start/
     // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
     // erneutes Wake-Word möglich ist.
+    //
+    // Echo-/Doppeltrigger-Schutz: TTS-Wiedergabe darf nur im Zustand
+    // SPEAKING laufen - siehe Kommentar bei der analogen Prüfung vor dem
+    // Wake-Word-Lauschen weiter oben.
+    sm.require(State::Speaking)?;
     if let Err(e) = cancellable(
         shutdown,
         tts::synthesize_and_play(&cfg.tts, &response, tmp_dir),

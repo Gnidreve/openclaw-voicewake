@@ -120,6 +120,14 @@ oder Shutdown-Abbruch verwaist weiter. Der `ProcessGroupGuard` killt beim
 Drop die ganze Gruppe - nach regulärem Prozessende ein wirkungsloser
 No-Op.
 
+**Wake-Word-Lauschen und TTS-Wiedergabe hängen an `require()`, nicht nur
+an der Aufrufreihenfolge.** `sm.require(State::ListeningForWakeword)` bzw.
+`sm.require(State::Speaking)` direkt vor dem jeweiligen Aufruf. Ohne diese
+Prüfung wäre der richtige Zustand nur Konvention (die passende
+`transition()` steht zwar davor, aber nichts erzwingt, dass sie stehen
+bleibt) - ein Refactor-Fehler könnte sonst unbemerkt die eigene
+TTS-Ausgabe wieder als Wake-Word einlesen lassen.
+
 **Der Zielkanal muss das CLI erreichen.** `{channel}` ist in
 `openclaw.args` Pflicht. Vorher setzte ein Adapter-Skript die Session fest
 und `target_channel` steuerte nichts - die Validierung bewachte einen Wert

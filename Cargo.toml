@@ -1,6 +1,6 @@
 [package]
 name = "openclaw-voicebridge"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "Lokaler macOS-Sprachdienst: Wake-Word -> VAD -> Whisper -> OpenClaw -> Piper TTS"
 
