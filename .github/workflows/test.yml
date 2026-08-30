@@ -8,6 +8,11 @@ on:
   pull_request:
     branches:
       - main
+    # Reine Doku-Änderungen (egal wie tief verschachtelt) sollen weder den
+    # günstigen Ubuntu-Runner noch - über build-macos.yml - potenziell den
+    # teuren macOS-Runner beschäftigen.
+    paths-ignore:
+      - '**/*.md'
   workflow_call:
 
 jobs:

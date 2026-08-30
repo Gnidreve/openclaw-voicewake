@@ -6,6 +6,11 @@ on:
       - main
     tags:
       - 'v*.*.*'
+    # Reine Doku-Änderungen (egal wie tief verschachtelt) sollen weder den
+    # eingebetteten Test-Job noch den teuren macOS-Runner beschäftigen -
+    # `plan` würde ohnehin build=false liefern, aber erst nach dem Checkout.
+    paths-ignore:
+      - '**/*.md'
   release:
     types: [published]
   workflow_dispatch:
