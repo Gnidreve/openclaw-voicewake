@@ -14,6 +14,40 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-30
+
+### Behoben
+
+- Ein unbekanntes Config-Feld (Tippfehler oder ein alter Feldname wie
+  `piper_binary`) wurde beim Laden stillschweigend ignoriert - das
+  betroffene Feld fiel unbemerkt auf seinen Default zurück, statt den
+  Start mit einer klaren Meldung abzubrechen. Jede Config-Struct trägt
+  jetzt `deny_unknown_fields`.
+- `build_openclaw_args`/`build_piper_args` ersetzten Platzhalter über zwei
+  verkettete `.replace()`-Aufrufe: Enthielt ein bereits eingesetzter Wert
+  (z. B. `target_channel`) selbst den literalen Text eines später
+  ersetzten Platzhalters, wurde dieser Text fälschlich nochmal ersetzt.
+  Ein neuer, einmaliger Ersetzungs-Durchlauf (`template::substitute`)
+  behebt das.
+- Schlug die SIGTERM-Registrierung fehl, deaktivierte das versehentlich
+  auch Ctrl+C für den gesamten Prozess - beide laufen jetzt in getrennten,
+  unabhängigen Tasks.
+
+### Hinzugefügt
+
+- `ROADMAP.md`: konkret geplante, noch offene Arbeit, versioniert und
+  getrennt von den unkonkreten Ideen in `ideas.md` und dem bereits
+  Veröffentlichten hier im Changelog.
+- Der Release-ZIP enthält jetzt auch `CHANGELOG.md` neben README und
+  `config.example.toml`.
+
+### Migration
+
+Kein Änderungsbedarf für eine korrekt geschriebene `config.toml`. Enthält
+deine Config einen Tippfehler oder ein veraltetes Feld, das bisher
+stillschweigend ignoriert wurde, bricht der Start jetzt mit einer klaren
+Fehlermeldung ab, statt das Feld unbemerkt auf den Default zu setzen.
+
 ## [0.1.5] - 2026-08-29
 
 Beide Shell-Adapter (`openclaw-adapter.sh`, `piper-adapter.sh`) werden
@@ -258,7 +292,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.2...v0.1.3
