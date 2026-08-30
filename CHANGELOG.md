@@ -14,6 +14,24 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-30
+
+### Behoben
+
+- Der Wake-Word-Prozess bekam seit 0.1.9 kein Mikrofon-Audio mehr, wenn er
+  aus Terminal.app gestartet wurde (im Feldtest nach 0.2.2 aufgefallen,
+  Regression aber unabhängig vom `chat.send`-Feature): `spawn_isolated`
+  (0.1.9, "kill whole process groups") hebt jeden Kindprozess in eine neue
+  Prozessgruppe, um Enkelprozesse bei Timeout/Shutdown mitzukillen - das
+  bricht auf macOS aber die TCC-Vererbung der Mikrofon-Berechtigung von
+  Terminal.app auf den Kindprozess. Symptom: Der Prozess startete
+  scheinbar normal, sein internes ffmpeg hing aber mit ~0% CPU in einem
+  blockierenden Read, ohne je Audio-Daten zu bekommen - kein Fehler-Log,
+  nur stille Funktionslosigkeit. `wakeword.rs` startet den Prozess jetzt
+  wieder ohne Prozessgruppen-Isolation (einfaches `cmd.spawn()` +
+  `kill_on_drop(true)`) - als einziger Aufrufer im Projekt, der tatsächlich
+  Mikrofon-Hardware anfasst.
+
 ## [0.2.2] - 2026-08-30
 
 ### Hinzugefügt
@@ -478,7 +496,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...v0.2.0

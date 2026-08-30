@@ -15,6 +15,14 @@
 //! `main.rs` oder normales Funktionsende ausgelöst wird. Ist die Gruppe zu
 //! dem Zeitpunkt bereits leer (regulär beendeter Prozess), ist der Aufruf
 //! ein wirkungsloser No-Op (`ESRCH`, wird ignoriert).
+//!
+//! **Ausnahme: `wakeword.rs` nutzt diese Funktion bewusst NICHT.** Eine neue
+//! Prozessgruppe trennt den Kindprozess auf macOS von Terminal.app - genau
+//! das bricht die TCC-Vererbung der Mikrofon-Berechtigung. Der
+//! Wake-Word-Prozess ist der einzige Aufrufer hier, der tatsächlich
+//! Mikrofon-Hardware anfasst (über sein eigenes internes ffmpeg), und
+//! bleibt deshalb bei einem einfachen `cmd.spawn()` +
+//! `cmd.kill_on_drop(true)`. Siehe die Invariante dazu in `AGENTS.md`.
 
 use std::io;
 use tokio::process::{Child, Command};

@@ -115,13 +115,33 @@ laute Frames über die ganze Aufnahme zu "Sprache".
 hängt nicht an `general.temp_dir` - jede Konfigurierbarkeit wäre ein Weg,
 die Sperre mit zwei Konfigurationen auszuhebeln.
 
-**Jeder Kindprozess läuft in seiner eigenen Prozessgruppe.**
-`child_process::spawn_isolated` statt `cmd.spawn()` direkt. `kill_on_drop`
-killt beim Drop nur die direkte Kind-PID; startet der Prozess selbst
-weitere Prozesse (denkbar beim OpenClaw-CLI), liefen die sonst bei Timeout
-oder Shutdown-Abbruch verwaist weiter. Der `ProcessGroupGuard` killt beim
-Drop die ganze Gruppe - nach regulärem Prozessende ein wirkungsloser
-No-Op.
+**Jeder Kindprozess läuft in seiner eigenen Prozessgruppe - außer dem
+Wake-Word-Prozess.** `child_process::spawn_isolated` statt `cmd.spawn()`
+direkt, für ffmpeg/whisper-cli/OpenClaw-CLI/Piper/Sound-Player.
+`kill_on_drop` killt beim Drop nur die direkte Kind-PID; startet der
+Prozess selbst weitere Prozesse (denkbar beim OpenClaw-CLI), liefen die
+sonst bei Timeout oder Shutdown-Abbruch verwaist weiter. Der
+`ProcessGroupGuard` killt beim Drop die ganze Gruppe - nach regulärem
+Prozessende ein wirkungsloser No-Op. **`wakeword.rs` ist die eine bewusste
+Ausnahme** - siehe eigene Invariante weiter unten.
+
+**Der Wake-Word-Prozess wird bewusst NICHT über `spawn_isolated`
+gestartet.** Regression aus 0.1.9 (`f2f01bb`), erst im Feldtest nach 0.2.2
+aufgefallen: `spawn_isolated`s `process_group(0)` hebt den Prozess in eine
+neue, von Terminal.app getrennte Prozessgruppe - genau das bricht auf
+macOS die TCC-Vererbung der Mikrofon-Berechtigung von Terminal.app auf den
+Kindprozess (der Wake-Word-Prozess startet intern sein eigenes ffmpeg
+fürs Mikrofon). Symptom: Prozess startet und läuft scheinbar normal, aber
+sein ffmpeg hängt mit ~0% CPU in einem blockierenden Read, nie
+irgendwelche Audio-Daten - kein Absturz, kein Fehler-Log, nur stille
+Funktionslosigkeit. Vor 0.1.9 (`spawn_isolated` existierte noch nicht)
+funktionierte derselbe Aufruf nachweislich. `wakeword.rs` nutzt deshalb
+weiterhin nur `cmd.kill_on_drop(true)` + normales `cmd.spawn()` - der
+einzige Kindprozess im gesamten Projekt, der tatsächlich
+TCC-geschütztes Hardware (Mikrofon) anfasst, ist auch der einzige, der
+nicht in eine eigene Prozessgruppe darf. Vor einer erneuten Umstellung auf
+`spawn_isolated` an dieser Stelle: auf echter Hardware gegenprüfen, ob das
+Mikrofon danach noch funktioniert.
 
 **Der Rauschboden wird bei jedem Frame nachgeführt, nie nur bei "Stille".**
 Läge die Umgebungslautstärke schon zu Beginn über der Anfangsschwelle,
