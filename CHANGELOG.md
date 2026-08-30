@@ -40,6 +40,22 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
   gesprochenen Antwort abdeckt - inklusive der Reihenfolge
   Zwischenmeldung-vor-Antwort.
 
+### Behoben
+
+- Der Wake-Word-Prozess bekam seit 0.1.9 kein Mikrofon-Audio mehr, wenn er
+  aus Terminal.app gestartet wurde (Feldtest bei diesem Release aufgefallen,
+  Regression aber unabhängig vom `chat.send`-Feature): `spawn_isolated`
+  (0.1.9, "kill whole process groups") hebt jeden Kindprozess in eine neue
+  Prozessgruppe, um Enkelprozesse bei Timeout/Shutdown mitzukillen - das
+  bricht auf macOS aber die TCC-Vererbung der Mikrofon-Berechtigung von
+  Terminal.app auf den Kindprozess. Symptom: Der Prozess startete
+  scheinbar normal, sein internes ffmpeg hing aber mit ~0% CPU in einem
+  blockierenden Read, ohne je Audio-Daten zu bekommen - kein Fehler-Log,
+  nur stille Funktionslosigkeit. `wakeword.rs` startet den Prozess jetzt
+  wieder ohne Prozessgruppen-Isolation (einfaches `cmd.spawn()` +
+  `kill_on_drop(true)`) - als einziger Aufrufer im Projekt, der tatsächlich
+  Mikrofon-Hardware anfasst.
+
 ## [0.2.1] - 2026-08-30
 
 ### Behoben
