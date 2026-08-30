@@ -12,12 +12,46 @@ Audioaufzeichnung.
 
 ## Zustandsmaschine
 
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+
+    IDLE --> LISTENING_FOR_WAKEWORD
+    LISTENING_FOR_WAKEWORD --> RECORDING: Wake-Word erkannt
+    RECORDING --> TRANSCRIBING: Stille-Uhr abgelaufen
+    TRANSCRIBING --> SENDING_TO_OPENCLAW
+    SENDING_TO_OPENCLAW --> SPEAKING
+
+    SPEAKING --> RECORDING: Antwort vorgelesen, Folgerunde erlaubt
+    SPEAKING --> IDLE: keine Antwort oder Rundenlimit erreicht
+
+    LISTENING_FOR_WAKEWORD --> IDLE: Abbruch
+    RECORDING --> IDLE: Fehler
+    TRANSCRIBING --> IDLE: Fehler
+    SENDING_TO_OPENCLAW --> IDLE: Fehler
+
+    note right of RECORDING
+        Glass-Ton läuft VOR dem Öffnen
+        des Mikrofons, danach mic_open_delay_ms.
+        Eine Uhr (silence_timeout_ms) beendet
+        die Aufnahme - Sprechen setzt sie zurück.
+    end note
+
+    note right of TRANSCRIBING
+        Ohne erkannte Sprache wird whisper
+        gar nicht erst aufgerufen.
+        Glass-Ton am Ende nur, wenn etwas
+        gesendet wird - sein Ausbleiben ist
+        das Signal "nichts verstanden".
+    end note
+
+    note right of SENDING_TO_OPENCLAW
+        Leeres oder gefiltertes Transkript
+        überspringt den OpenClaw-Aufruf.
+    end note
 ```
-IDLE → LISTENING_FOR_WAKEWORD → RECORDING → TRANSCRIBING
-     → SENDING_TO_OPENCLAW → SPEAKING → IDLE
-                                 │
-                                 └──→ RECORDING (Folgeeingabe, kein Wake-Word nötig)
-```
+
+Entspricht 1:1 den in `src/state.rs::allowed_next()` erlaubten Übergängen.
 
 Jeder Zwischenzustand kann bei Fehlern/Timeouts direkt zurück nach `IDLE`
 springen, damit der Dienst nicht hängen bleibt. Während `SPEAKING` läuft
@@ -456,9 +490,9 @@ sehen bekommt: der Start-Ton außerhalb der Aufnahme (siehe
 Sprach-Erkennung der VAD, die `min_speech_ms` **zusammenhängend** verlangt
 (`vad.speech_gap_ms`) - ohne beides öffnete sich das Gate bei jeder
 Aufnahme. Was danach noch durchkommt, ist echtes Fremdgeräusch über dem
-RMS-Schwellwert; der zugehörige offene Punkt (fixer
+RMS-Schwellwert; der zugehörige geplante Punkt (fixer
 `vad.silence_rms_threshold` vs. dynamische Raumlautstärke) steht in
-`ideas.md`.
+`ROADMAP.md`.
 
 Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
 fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur
@@ -532,6 +566,6 @@ prüft, steht in [AGENTS.md](AGENTS.md#tests).
   auf dem tatsächlichen macOS-Zielsystem `cargo build --release` und
   `cargo test` erneut ausführen sowie den `--dry-run`-Modus mit den echten
   whisper-cli/Piper/OpenClaw-Binaries durchspielen.
-- Was noch offen ist und warum, steht durchgängig in `ideas.md`; die
-  Invarianten, die dabei nicht gebrochen werden dürfen, in
+- Was konkret geplant ist, steht in `ROADMAP.md`, unkonkrete Ideen in
+  `ideas.md`; die Invarianten, die dabei nicht gebrochen werden dürfen, in
   [AGENTS.md](AGENTS.md#invarianten).

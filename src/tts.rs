@@ -7,6 +7,7 @@ use tokio::time::{timeout, Duration};
 use tracing::info;
 
 use crate::config::TtsConfig;
+use crate::template::substitute;
 
 /// Platzhalter für den Pfad der zu erzeugenden WAV-Datei.
 pub const OUTPUT_PLACEHOLDER: &str = "{output}";
@@ -19,12 +20,13 @@ pub const VOICE_PLACEHOLDER: &str = "{voice}";
 /// dass die Bridge deren Flags kennen muss.
 pub fn build_piper_args(cfg: &TtsConfig, out_wav: &Path) -> Vec<String> {
     let output = out_wav.to_string_lossy();
+    let replacements = [
+        (OUTPUT_PLACEHOLDER, output.as_ref()),
+        (VOICE_PLACEHOLDER, cfg.voice.as_str()),
+    ];
     cfg.args
         .iter()
-        .map(|arg| {
-            arg.replace(OUTPUT_PLACEHOLDER, &output)
-                .replace(VOICE_PLACEHOLDER, &cfg.voice)
-        })
+        .map(|arg| substitute(arg, &replacements))
         .collect()
 }
 
@@ -119,6 +121,22 @@ mod tests {
                 "/tmp/out.wav"
             ]
         );
+    }
+
+    /// Regression: Enthält der Output-Pfad selbst den literalen Text
+    /// `{voice}` (z. B. durch einen Stimmennamen im Tempverzeichnis-Pfad),
+    /// wurde er von der nachfolgenden Stimmen-Ersetzung fälschlich nochmal
+    /// überschrieben, weil die alte Implementierung zwei verkettete
+    /// `.replace()`-Aufrufe nacheinander ausführte.
+    #[test]
+    fn an_output_path_containing_another_placeholders_text_is_not_corrupted() {
+        let cfg = TtsConfig {
+            voice: "thorsten".to_string(),
+            args: vec!["--output_file".to_string(), "{output}".to_string()],
+            ..Default::default()
+        };
+        let args = build_piper_args(&cfg, &PathBuf::from("/tmp/{voice}-out.wav"));
+        assert_eq!(args, vec!["--output_file", "/tmp/{voice}-out.wav"]);
     }
 
     /// Bildet den bisherigen piper-adapter.sh exakt nach - den Zweig, der im

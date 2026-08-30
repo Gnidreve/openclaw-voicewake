@@ -136,7 +136,7 @@ jobs:
           set -euo pipefail
           mkdir "$STAGE"
           cp "target/release/$BIN" "$STAGE/"
-          cp README.md config.example.toml "$STAGE/"
+          cp README.md CHANGELOG.md config.example.toml "$STAGE/"
           ditto -c -k --sequesterRsrc --keepParent "$STAGE" "$STAGE.zip"
 
       - name: Upload ZIP artifact

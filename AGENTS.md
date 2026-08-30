@@ -75,6 +75,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
 | `tts.rs` | Piper-Aufruf, Wiedergabe |
+| `template.rs` | Platzhalter-Ersetzung in Argumentlisten (ein Durchlauf, nicht verkettet) |
 | `sound.rs` | Bestätigungs- und Fehlerton |
 | `instance_lock.rs` | Einzelinstanz-Sperre |
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
@@ -114,6 +115,18 @@ die Sperre mit zwei Konfigurationen auszuhebeln.
 `openclaw.args` Pflicht. Vorher setzte ein Adapter-Skript die Session fest
 und `target_channel` steuerte nichts - die Validierung bewachte einen Wert
 ohne Wirkung.
+
+**Ein unbekanntes Config-Feld ist ein Abbruch, kein Default.** Jede
+Config-Struct trägt `deny_unknown_fields`. Ohne das fiel ein Tippfehler oder
+ein alter Feldname (z. B. `piper_binary` statt `binary`) beim Laden
+stillschweigend auf den Default zurück - ein Bug, der nur beim ersten
+Sprechversuch auffiel, nicht beim Start.
+
+**Platzhalter werden in einem Durchlauf ersetzt, nie verkettet.**
+`template::substitute` scannt `openclaw.args`/`tts.args` einmal von links
+nach rechts. Zwei nacheinander ausgeführte `.replace()`-Aufrufe können einen
+bereits eingesetzten Wert (z. B. `target_channel`) erneut als Platzhalter
+interpretieren, wenn er zufällig dessen literalen Text enthält.
 
 **Der Transkript-Filter ist das letzte Netz, nicht die tragende Schicht.**
 Die Musterliste nicht ausbauen: Sie fängt bekannte Whisper-Halluzinationen
@@ -169,24 +182,23 @@ mergen erzeugt Tag, Release und ZIP; Details im
 [Release-Abschnitt der README](README.md#release). Ein Tag, der nicht zu
 `Cargo.toml` passt, bricht den Workflow ab.
 
-## Offene Punkte
+## Ideen, Roadmap, Changelog
 
-`ideas.md` ist die gepflegte Liste - erledigte Punkte sind durchgestrichen
-und mit dem Ergebnis versehen, offene stehen im Klartext da. Die derzeit
-wichtigsten:
+Drei Dateien, ein Punkt gehört immer nur in genau eine davon:
 
-* **Adaptiver RMS-Schwellwert** (Punkt 14): `silence_rms_threshold` ist
-  fix. Liegt die Raumlautstärke dauerhaft darüber - laufender Fernseher -,
-  gilt Geräusch als Sprache. Das ist die Wurzel hinter dem Transkript-Filter.
-* **Whisper-eigenes VAD**: `--vad` mit Silero würde Halluzinationen aus
-  Nicht-Sprache an der Quelle abstellen; über `whisper.extra_args` ohne
-  Rust-Änderung testbar.
-* **`[Output] skipped` ist tonlos** - abgeschickt, aber keine Antwort
-  erhalten, bleibt akustisch unbemerkt.
-* **Wake-Word-Listener als externer Prozess**: Der Neustart pro Zyklus war
-  die Quelle mehrerer Fehler. In Rust wäre es ein einziger
-  Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die Nachbildung der
-  openWakeWord-Vorverarbeitung.
+* **`ideas.md`** - unsortierter Rohideen-Eimer. Alles rein, ohne Anspruch
+  auf Umsetzung oder Reihenfolge.
+* **`ROADMAP.md`** - nur konkret geplante, noch offene Punkte, je einer
+  künftigen Version zugeordnet. Aufgebaut wie ein Stack: oben steht, was
+  als Nächstes drankommt, neue Punkte werden unten angehängt.
+* **`CHANGELOG.md`** - nur bereits veröffentlichte Punkte.
+
+Wird eine Idee konkret geplant, wandert sie aus `ideas.md` in `ROADMAP.md`
+und wird dort gelöscht. Wird ein Roadmap-Punkt veröffentlicht, wandert er
+aus `ROADMAP.md` ins `CHANGELOG.md` und wird dort gelöscht. Keine Dopplung
+zwischen den drei Dateien: Für den aktuellen Stand der geplanten Arbeit
+gilt `ROADMAP.md`, für unkonkrete Ideen `ideas.md` - nicht diese Datei
+hier, die nur die Spielregel dafür festhält.
 
 ## Was dieses Projekt nicht tut
 

@@ -4,6 +4,7 @@ mod instance_lock;
 mod openclaw;
 mod sound;
 mod state;
+mod template;
 mod transcribe;
 mod transcript_filter;
 mod transcript_log;
@@ -117,28 +118,37 @@ async fn wait_for_shutdown(shutdown: &AtomicBool) {
     }
 }
 
+/// Registriert Ctrl+C und (unter Unix) SIGTERM je in einer eigenen Task,
+/// statt beide hinter einem gemeinsamen `select!` zu verstecken: Schlägt die
+/// SIGTERM-Registrierung fehl (selten, aber möglich - z. B. in einer
+/// eingeschränkten Sandbox), darf das Ctrl+C nicht mit lahmlegen. Beide Tasks
+/// setzen unabhängig voneinander denselben `shutdown`-Flag.
 fn spawn_signal_handler(shutdown: Arc<AtomicBool>) {
+    tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("SIGINT empfangen");
+            shutdown.store(true, Ordering::SeqCst);
+        }
+    });
+
+    #[cfg(unix)]
     tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = match signal(SignalKind::terminate()) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!(error = %e, "Kann SIGTERM-Handler nicht registrieren");
-                    return;
-                }
-            };
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => info!("SIGINT empfangen"),
-                _ = sigterm.recv() => info!("SIGTERM empfangen"),
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+                info!("SIGTERM empfangen");
+                shutdown.store(true, Ordering::SeqCst);
+            }
+            Err(e) => {
+                error!(
+                    error = %e,
+                    "Kann SIGTERM-Handler nicht registrieren - Ctrl+C bleibt trotzdem verfügbar"
+                );
             }
         }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-        }
-        shutdown.store(true, Ordering::SeqCst);
     });
 }
 

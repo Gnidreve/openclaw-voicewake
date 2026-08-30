@@ -5,6 +5,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 
 use crate::config::OpenClawConfig;
+use crate::template::substitute;
 
 /// Platzhalter für den Zielkanal bzw. Session-Key aus `target_channel`.
 pub const CHANNEL_PLACEHOLDER: &str = "{channel}";
@@ -25,12 +26,13 @@ pub fn render_message(cfg: &OpenClawConfig, transcript: &str) -> String {
 /// heißt und vor oder nach anderen Argumenten stehen muss.
 pub fn build_openclaw_args(cfg: &OpenClawConfig, transcript: &str) -> Vec<String> {
     let message = render_message(cfg, transcript);
+    let replacements = [
+        (CHANNEL_PLACEHOLDER, cfg.target_channel.as_str()),
+        (MESSAGE_PLACEHOLDER, message.as_str()),
+    ];
     cfg.args
         .iter()
-        .map(|arg| {
-            arg.replace(CHANNEL_PLACEHOLDER, &cfg.target_channel)
-                .replace(MESSAGE_PLACEHOLDER, &message)
-        })
+        .map(|arg| substitute(arg, &replacements))
         .collect()
 }
 
@@ -188,6 +190,26 @@ mod tests {
         let args = build_openclaw_args(&cfg, "hi");
         assert!(args.contains(&"agent:main:andere-session".to_string()));
         assert!(!args.contains(&"agent:main:voice-assistant".to_string()));
+    }
+
+    /// Regression: `target_channel` konnte den literalen Text `{message}`
+    /// enthalten (z. B. Zufall oder ein unglücklich gewählter Kanalname) und
+    /// wurde dann von der nachfolgenden Message-Ersetzung fälschlich
+    /// nochmal überschrieben, weil die alte Implementierung zwei verkettete
+    /// `.replace()`-Aufrufe nacheinander ausführte.
+    #[test]
+    fn a_target_channel_containing_another_placeholders_text_is_not_corrupted() {
+        let cfg = OpenClawConfig {
+            target_channel: "chan-{message}-x".to_string(),
+            args: ["--channel", "{channel}", "--message", "{message}"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            ..Default::default()
+        };
+        let args = build_openclaw_args(&cfg, "hallo");
+        let channel_pos = args.iter().position(|a| a == "--channel").unwrap();
+        assert_eq!(args[channel_pos + 1], "chan-{message}-x");
     }
 
     #[test]
