@@ -1,6 +1,6 @@
 [package]
 name = "openclaw-voicebridge"
-version = "0.1.14"
+version = "0.2.0"
 edition = "2021"
 description = "Lokaler macOS-Sprachdienst: Wake-Word -> VAD -> Whisper -> OpenClaw -> Piper TTS"
 
@@ -26,6 +26,15 @@ hound = "3.5"
 uuid = { version = "1", features = ["v4"] }
 # Für das Auslesen der Antwort aus der JSON-Ausgabe des OpenClaw-CLI.
 serde_json = "1"
+# Gateway-WebSocket-Client (transport = "websocket", siehe src/gateway_client.rs).
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+# Geräteidentität/-signatur für den Gateway-Connect-Handshake (siehe src/device_identity.rs).
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
 
 # Nur für die flock-basierte Einzelinstanz-Sperre (siehe src/instance_lock.rs).
 [target.'cfg(unix)'.dependencies]

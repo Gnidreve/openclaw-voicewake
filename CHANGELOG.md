@@ -14,6 +14,31 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-30
+
+### Hinzugefügt
+
+- Neuer Transportweg `openclaw.transport = "websocket"` (Standard bleibt
+  `"cli"`, beide dauerhaft unterstützt): spricht direkt mit dem
+  OpenClaw-Gateway statt über das CLI. Neue Config-Felder `gateway_host`,
+  `gateway_port` (Standard `18789`) und `gateway_token`.
+- Ed25519-Geräteidentität (`device_identity.rs`), persistiert unter
+  `~/.openclaw-voicebridge/device_identity.json`: Der Gateway-Connect-
+  Handshake erfordert eine signierte Geräteidentität, ein gemeinsames
+  `gateway_token` allein reicht nicht für nutzbare Scopes (verifiziert im
+  OpenClaw-Quellcode). Bei einer neuen, noch nicht gekoppelten Identität
+  zeigt die Fehlermeldung die `requestId` für die einmalige Genehmigung via
+  `openclaw devices approve <requestId>` auf dem Gateway-Host.
+- `gateway_client.rs`: verbindet sich, führt den signierten
+  `connect`-Handshake aus, abonniert `openclaw.target_channel` über
+  `sessions.messages.subscribe` und protokolliert eingehende Events
+  (`chat`, `session.message`, `session.operation`, `session.tool`) - bewusst
+  rein lesend, `chat.send` folgt erst in 0.2.1.
+- `--probe-gateway`: Diagnose-Flag, das nur den WebSocket-Pfad ausführt,
+  ohne Mikrofon/Wake-Word/Piper anzufassen - läuft bewusst vor der
+  Einzelinstanz-Sperre, da es keine der von ihr geschützten Ressourcen
+  anfasst.
+
 ## [0.1.14] - 2026-08-30
 
 ### Hinzugefügt
@@ -406,7 +431,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...v0.2.0
 [0.1.14]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...v0.1.12

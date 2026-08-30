@@ -277,6 +277,52 @@ OpenClaw-Antwort nicht leer sind: Anders als im Realbetrieb öffnet
 `--dry-run-file` erneut "aufgenommen" würde - das würde bei erkannter
 Sprache sonst zu einer Endlosschleife mit identischer Eingabe führen.
 
+## WebSocket-Gateway-Transport (0.2.x, noch read-only)
+
+Alternative zum CLI-Aufruf: `openclaw.transport = "websocket"` spricht
+direkt mit dem OpenClaw-Gateway statt `openclaw agent --json` aufzurufen.
+Beide Transporte werden dauerhaft unterstützt, `"cli"` bleibt Standard und
+vollwertiger Weg - keine Abkündigung.
+
+```toml
+[openclaw]
+transport = "websocket"
+gateway_host = "127.0.0.1"  # oder IP/Hostname eines Gateways im LAN/Tailnet
+gateway_port = 18789
+gateway_token = "das-gemeinsame-gateway-token"  # gateway.auth.token
+```
+
+**Einmalige Geräte-Kopplung erforderlich.** Ein gültiges `gateway_token`
+allein reicht dem Gateway nicht für vollen Zugriff - ohne eine signierte
+Geräteidentität setzt es angeforderte Scopes stillschweigend auf leer
+zurück (verifiziert im OpenClaw-Quellcode). `openclaw-voicebridge` legt
+deshalb beim ersten Start eine eigene Ed25519-Geräteidentität unter
+`~/.openclaw-voicebridge/device_identity.json` an und meldet sich damit
+signiert an. Lehnt das Gateway die erste Verbindung mit einer
+Kopplungsanfrage ab, zeigt die Fehlermeldung eine `requestId` - auf dem
+Gateway-Host genügt einmalig:
+
+```bash
+openclaw devices list
+openclaw devices approve <requestId>
+```
+
+Danach die Bridge neu starten; das Gateway erkennt das Gerät ab dann
+automatisch wieder.
+
+**Diagnose ohne Sprachpipeline:** `--probe-gateway` verbindet sich, meldet
+sich an, abonniert `openclaw.target_channel` und protokolliert eingehende
+Events - ohne Mikrofon, Wake-Word-Listener oder Piper anzufassen. Nützlich,
+um die Gateway-Verbindung und die Geräte-Kopplung isoliert zu testen:
+
+```bash
+openclaw-voicebridge --config config.toml --probe-gateway
+```
+
+Aktueller Stand (0.2.0): rein lesend, es wird noch nichts über den
+WebSocket gesendet. `chat.send` (aktives Auslösen einer Antwort) kommt erst
+in 0.2.1 - siehe [ROADMAP.md](ROADMAP.md).
+
 ## CLI-Adapter-Verträge
 
 ### Wake-Word-Kommando (`wakeword.command`)
