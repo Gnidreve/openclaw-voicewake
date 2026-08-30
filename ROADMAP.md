@@ -58,22 +58,80 @@ CLI-Nutzung derselben Session, nicht durch diesen Prototyp selbst.
 - `transport = "cli"` bleibt vollwertiger Legacy-Pfad, nicht nur ein
   Fallback - beide Transporte werden dauerhaft unterstützt.
 
+Jeder Schritt ab hier bekommt seine Tests direkt beim Bauen (wie bisher:
+Unit-Tests in der Datei, ein Mock-Gateway-Feature-Test in `tests/` analog
+zu `tests/pipeline_with_stubs.rs`) - nicht erst gesammelt danach in 0.3.x.
+0.3.x ist für die große strukturelle Aufräumung reserviert, siehe dort.
+
+### 0.2.2 - Transkription über das OpenClaw-Gateway (Whisper-Ersatz)
+
+Erst nachdem 0.2.1 läuft und stabil ist - eigene Ressourcen (lokales
+Whisper) bleiben bis dahin der einzige Transkriptionsweg. Recherchegrundlage:
+[`Gateway-Transcription.md`](Gateway-Transcription.md) (`talk.session.create`
+mit `mode: transcription`, `transport: gateway-relay`, `brain: none`,
+gefolgt von `talk.session.appendAudio` und `talk.session.close`). Das
+Dokument ist ausdrücklich als Recherche-/Diagnosegrundlage markiert, keine
+verifizierte Spezifikation - jede konkrete Payload-Form, Auth und das
+tatsächliche Audioformat müssen gegen die installierte OpenClaw-Version
+geprüft werden, bevor sie fest verdrahtet werden.
+
+- Neuer Konfig-Schalter orthogonal zu `transport`, z. B.
+  `audio_pipeline = "local"` (Default, unverändert) oder `"gateway"` -
+  setzt `transport = "websocket"` voraus, sonst Abbruch beim Start.
+- Ersetzt bei `audio_pipeline = "gateway"` den `ffmpeg`+`whisper-cli`-Pfad:
+  Audio wird als PCM16/24kHz-Chunks über die WebSocket-Session gestreamt
+  statt lokal transkribiert.
+- Offene Frage, die dieser Schritt selbst klären muss: Übernimmt die
+  Gateway-Session das Ende-der-Sprache-Erkennung (Turn-Ende), oder bleibt
+  die lokale VAD (`vad.rs`) weiterhin dafür zuständig und steuert nur,
+  wann `appendAudio` aufhört? Das entscheidet, ob `vad.rs` in diesem Pfad
+  unverändert weiterläuft oder nur noch als Chunking-Trigger dient.
+- `audio_pipeline = "local"` bleibt vollwertiger Pfad, keine Abkündigung
+  von Whisper.
+
+### 0.2.3 - Sprachausgabe über das OpenClaw-Gateway (Piper-Ersatz)
+
+Eigene Recherche nötig, bevor das begonnen wird: `Gateway-Transcription.md`
+deckt ausschließlich die Transkriptionsrichtung ab (Audio rein), nicht die
+Synthese-Richtung (Text/Antwort raus als Audio) - das Dokument selbst
+benennt das in Abschnitt 42 als separat zu untersuchende zweite Phase.
+Vermutlich relevant, aber nicht verifiziert: der `stt-tts`/`managed-room`-
+Pfad bzw. `talk.client.create` statt `talk.session.create`.
+
+- Setzt 0.2.2 voraus (derselbe `audio_pipeline = "gateway"`-Schalter),
+  ersetzt bei Aktivierung den lokalen Piper-Aufruf durch vom Gateway
+  synthetisiertes Audio.
+- `audio_pipeline = "local"` bleibt vollwertiger Pfad, keine Abkündigung
+  von Piper.
+
 ## 0.3.x - Testing & Projektstruktur
 
-Kein neues Nutzerverhalten, sondern Testabdeckung für das in 0.2.x neu
-Gebaute nachziehen - bestehende Konvention: Unit-Tests direkt in der
-jeweiligen Datei (`#[cfg(test)] mod tests`), Feature-/Integrationstests in
-`tests/`. Struktur zuerst, Tests danach: erst `src/` und `tests/` für den
-seit 0.2.x gewachsenen Umfang neu ordnen, dann die neuen Module und Pfade
-in dieser Struktur testen - nicht andersherum, sonst müssten die neuen
-Tests bei der Umstrukturierung gleich wieder mitverschoben werden.
+Bewusst erst nach dem **kompletten** 0.2.x-Block (inklusive der
+Gateway-Audio-Migration 0.2.2/0.2.3), nicht dazwischengeschoben: Die
+Gateway-Audio-Migration wird voraussichtlich `audio.rs`, `transcribe.rs`,
+`tts.rs` und ggf. `vad.rs` grundlegend anders schneiden als eine reine
+Transport-Umstellung für Textnachrichten - eine Restrukturierung vor
+diesem Punkt (oder nur bis 0.2.1) müsste mit hoher Wahrscheinlichkeit ein
+zweites Mal gemacht werden, sobald die Audio-Migration landet. Deshalb
+bewusst erst, wenn die endgültige Form von 0.2.x feststeht.
+
+Kein neues Nutzerverhalten, sondern Testabdeckung/Struktur für das in
+0.2.x neu Gebaute nachziehen - bestehende Konvention: Unit-Tests direkt in
+der jeweiligen Datei (`#[cfg(test)] mod tests`), Feature-/Integrationstests
+in `tests/`. Struktur zuerst, Tests danach: erst `src/` und `tests/` für
+den seit 0.2.x gewachsenen Umfang neu ordnen, dann die neuen Module und
+Pfade in dieser Struktur testen - nicht andersherum, sonst müssten die
+neuen Tests bei der Umstrukturierung gleich wieder mitverschoben werden.
+(Die je Schritt in 0.2.x bereits geschriebenen Tests decken die Logik ab;
+hier geht es um die große strukturelle Aufräumung und System-Level-
+Regressionstests über den kompletten neuen Pfad.)
 
 | Version | Thema |
 |---|---|
-| 0.3.0 | `src/`-Modulstruktur nach 0.2.x neu ordnen: `openclaw.rs` wird zu einem Modul mit CLI- und WebSocket-Transport (z. B. `src/openclaw/{mod,cli,websocket}.rs`) statt einer wachsenden Einzeldatei. Exakter Zuschnitt entscheidet sich an der tatsächlichen Größe der 0.2.x-Module. |
-| 0.3.1 | `tests/`-Struktur vor den neuen Feature-Tests festlegen: gemeinsame Test-Helfer (Stub-Erzeugung wie in `tests/pipeline_with_stubs.rs`) in ein wiederverwendbares Modul auslagern, statt sie in jedem künftigen Feature-Test erneut zu duplizieren |
-| 0.3.2 | Unit-Tests für den in 0.2.x neuen WebSocket-Client direkt in den Dateien der neuen `src/`-Struktur |
-| 0.3.3 | Feature-Test in `tests/` für den kompletten WebSocket-Pfad - nicht nur Verbindungsaufbau/Subscribe, sondern bis zur tatsächlichen Sprachausgabe: `chat.send` -> `deltaText`/`final`-Events -> Piper, gegen ein Mock-Gateway statt echtem OpenClaw (analog zu `tests/pipeline_with_stubs.rs`) |
+| 0.3.0 | `src/`-Modulstruktur nach dem kompletten 0.2.x-Block neu ordnen: `openclaw.rs` wird zu einem Modul mit CLI- und WebSocket-Transport (z. B. `src/openclaw/{mod,cli,websocket}.rs`); je nachdem, wie 0.2.2/0.2.3 tatsächlich geschnitten wurden, betrifft das ggf. auch `audio.rs`/`transcribe.rs`/`tts.rs` (lokaler vs. Gateway-Pfad). Exakter Zuschnitt entscheidet sich an der tatsächlichen Größe und Form der 0.2.x-Module, nicht vorab festlegen. |
+| 0.3.1 | `tests/`-Struktur vor den neuen Regressionstests festlegen: gemeinsame Test-Helfer (Stub-/Mock-Erzeugung wie in `tests/pipeline_with_stubs.rs`) in ein wiederverwendbares Modul auslagern, statt sie in jedem künftigen Feature-Test erneut zu duplizieren |
+| 0.3.2 | Unit-Tests für das Ergebnis der `src/`-Restrukturierung (0.3.0) nachziehen, wo sich durch das Verschieben Lücken ergeben - die fachliche Logik selbst ist bereits aus den 0.2.x-Schritten getestet |
+| 0.3.3 | System-Level-Regressionstest in `tests/` für den kompletten Pfad über alle in 0.2.x aktivierbaren Kombinationen (`transport` x `audio_pipeline`) hinweg, gegen ein Mock-Gateway statt echtem OpenClaw (analog zu `tests/pipeline_with_stubs.rs`) |
 
 ## 0.4.x - Packaging als Hintergrunddienst
 
