@@ -277,7 +277,7 @@ OpenClaw-Antwort nicht leer sind: Anders als im Realbetrieb öffnet
 `--dry-run-file` erneut "aufgenommen" würde - das würde bei erkannter
 Sprache sonst zu einer Endlosschleife mit identischer Eingabe führen.
 
-## WebSocket-Gateway-Transport (0.2.x, noch read-only)
+## WebSocket-Gateway-Transport
 
 Alternative zum CLI-Aufruf: `openclaw.transport = "websocket"` spricht
 direkt mit dem OpenClaw-Gateway statt `openclaw agent --json` aufzurufen.
@@ -290,7 +290,19 @@ transport = "websocket"
 gateway_host = "127.0.0.1"  # oder IP/Hostname eines Gateways im LAN/Tailnet
 gateway_port = 18789
 gateway_token = "das-gemeinsame-gateway-token"  # gateway.auth.token
+interim_message = "Einen Moment, ich schaue nach."
 ```
+
+Seit 0.2.2 sendet `transport = "websocket"` echte Nachrichten über
+`chat.send`. Das ist laut Gateway-Protokoll **non-blocking**: die Antwort
+auf den Request selbst ist nur ein sofortiges ACK (`status: "started"`) -
+sobald das ankommt, spricht die Bridge `interim_message` (Pendant zum "Ich
+schau mir das an" aus Telegram), während im Hintergrund auf die
+gestreamten `chat`-Events mit der eigentlichen Antwort gewartet wird.
+Deren `deltaText`-Felder werden zur vollständigen Antwort gesammelt, ein
+`final`-Event schließt die Runde ab. Session-Resets
+(`session_reset_after_secs`) funktionieren über diesen Transport genauso
+wie über CLI, nur eben über `chat.send` statt einen CLI-Aufruf.
 
 **Einmalige Geräte-Kopplung erforderlich.** Ein gültiges `gateway_token`
 allein reicht dem Gateway nicht für vollen Zugriff - ohne eine signierte
@@ -319,9 +331,9 @@ um die Gateway-Verbindung und die Geräte-Kopplung isoliert zu testen:
 openclaw-voicebridge --config config.toml --probe-gateway
 ```
 
-Aktueller Stand (0.2.0): rein lesend, es wird noch nichts über den
-WebSocket gesendet. `chat.send` (aktives Auslösen einer Antwort) kommt erst
-in 0.2.1 - siehe [ROADMAP.md](ROADMAP.md).
+`--probe-gateway` selbst bleibt weiterhin rein lesend (kein `chat.send`) -
+es ist ein Diagnose-Werkzeug für Verbindung/Kopplung, keine Möglichkeit,
+eine echte Nachricht ohne die volle Sprachpipeline abzuschicken.
 
 ## CLI-Adapter-Verträge
 

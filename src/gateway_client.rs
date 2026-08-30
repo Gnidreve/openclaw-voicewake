@@ -1,11 +1,15 @@
-//! Gateway-WebSocket-Client (0.2.0: read-only Streaming-Prototyp).
+//! Gateway-WebSocket-Client (0.2.0: read-only Streaming-Prototyp; 0.2.2:
+//! `chat.send` für die volle Integration).
 //!
 //! Verbindet sich als OpenClaw-Operator mit dem Gateway, meldet sich über den
 //! in `device_identity.rs` implementierten Ed25519-Signaturvertrag an und
 //! abonniert die Transkript-/Nachrichtenereignisse des konfigurierten
-//! Zielkanals. Bewusst rein lesend: `chat.send` (aktives Auslösen einer
-//! Antwort) kommt erst in einer späteren Version - hier wird nur
-//! protokolliert, was das Gateway an Events liefert.
+//! Zielkanals. Zwei Nutzungsarten teilen sich denselben Connect-/
+//! Subscribe-Ablauf:
+//!   - `run_read_only_probe`: rein lesend, für `--probe-gateway`.
+//!   - `send_chat_message`: löst über `chat.send` aktiv eine Antwort aus und
+//!     sammelt die gestreamten `deltaText`-Events zur vollständigen Antwort
+//!     (0.2.2, `transport = "websocket"`).
 //!
 //! Frame-Formen und Methodennamen sind gegen den tatsächlichen
 //! OpenClaw-Quellcode geprüft (nicht nur gegen die Doku):
@@ -22,11 +26,26 @@
 //!     gültig (eigenes, unabhängiges Enum `{"operator","node"}`) - nicht für
 //!     `client.mode`. `openclaw-probe`/`probe` ist der für einen
 //!     Diagnose-Client wie `--probe-gateway` vorgesehene Eintrag.
+//!   - `packages/gateway-protocol/src/schema/logs-chat.ts`
+//!     (`ChatSendParamsSchema`: `sessionKey` statt `key`, Pflichtfeld
+//!     `idempotencyKey`; `ChatEventSchema`: `state` in
+//!     `status`/`delta`/`final`/`aborted`/`error`, `deltaText`/`replace` nur
+//!     bei `delta`).
+//!   - `src/gateway/server-methods/chat-send-session.ts` (`clientRunId =
+//!     p.idempotencyKey` - das vom Client vergebene `idempotencyKey` ist
+//!     also *identisch* mit dem `runId`, das im ACK und in allen folgenden
+//!     `chat`-Events steht. Kein zusätzlicher Antwort-Parse-Schritt nötig,
+//!     um die eigenen Events herauszufiltern.)
+//!   - `src/gateway/server-methods/chat-broadcast.ts` (`chat`-Events werden
+//!     an `sessionKeys`-Topics gesendet, nicht an alle Verbindungen - ohne
+//!     vorheriges `sessions.messages.subscribe` auf denselben Kanal kämen
+//!     also gar keine Events an, selbst mit gültigem `chat.send`-ACK.)
 
 use anyhow::{bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
+use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::tungstenite::Message;
@@ -184,6 +203,30 @@ fn build_subscribe_request(target_channel: &str, request_id: &str) -> serde_json
     })
 }
 
+/// Baut den `chat.send`-Request. Anders als `sessions.messages.subscribe`
+/// heißt das Zielfeld hier `sessionKey`, nicht `key` -
+/// `ChatSendParamsSchema` in `packages/gateway-protocol/src/schema/logs-chat.ts`
+/// ist da unmissverständlich, auch wenn es inkonsistent zur
+/// Subscribe-Methode ist. `idempotencyKey` ist Pflicht und wird 1:1 als
+/// `runId` in ACK und Events zurückgespiegelt (siehe Modul-Doku oben).
+fn build_chat_send_request(
+    target_channel: &str,
+    message: &str,
+    idempotency_key: &str,
+    request_id: &str,
+) -> serde_json::Value {
+    json!({
+        "type": "req",
+        "id": request_id,
+        "method": "chat.send",
+        "params": {
+            "sessionKey": target_channel,
+            "message": message,
+            "idempotencyKey": idempotency_key,
+        }
+    })
+}
+
 fn pairing_required_message(error: &GatewayErrorPayload) -> Option<String> {
     let code = error
         .details
@@ -252,10 +295,12 @@ async fn read_response(
     }
 }
 
-/// Verbindet sich einmalig, meldet sich an, abonniert den konfigurierten
-/// Zielkanal und protokolliert Events, bis der Prozess beendet wird (Strg+C)
-/// oder die Verbindung abbricht.
-pub async fn run_read_only_probe(cfg: &Config) -> Result<()> {
+/// Baut Identität, Verbindung und den signierten `connect`-Handshake auf und
+/// gibt den verbundenen Socket zurück (nach erfolgreichem `hello-ok`).
+/// Gemeinsamer erster Schritt für `run_read_only_probe` und
+/// `send_chat_message` - beide brauchen exakt denselben Ablauf, bevor sie
+/// sich in Abonnieren-und-Zuhören bzw. Abonnieren-und-Senden unterscheiden.
+async fn connect_and_handshake(cfg: &Config) -> Result<WsStream> {
     let identity_path = crate::device_identity::identity_path()?;
     let identity = DeviceIdentity::load_or_create(&identity_path)
         .context("Kann Geräteidentität nicht laden/anlegen")?;
@@ -325,13 +370,25 @@ pub async fn run_read_only_probe(cfg: &Config) -> Result<()> {
         "Gateway-Verbindung hergestellt (hello-ok)"
     );
 
-    // 3. Zielkanal abonnieren.
+    Ok(ws)
+}
+
+/// Abonniert den konfigurierten Zielkanal auf einer bereits verbundenen
+/// Session. Pflicht vor `chat.send`, nicht nur vor dem read-only Prototyp:
+/// `chat`-Events werden vom Gateway nur an `sessionKeys`-Topics gesendet,
+/// die die Verbindung abonniert hat (siehe Modul-Doku oben) - ohne dieses
+/// Abonnement käme trotz erfolgreichem `chat.send`-ACK nie eine Antwort an.
+async fn subscribe_channel(
+    ws: &mut WsStream,
+    target_channel: &str,
+    timeout_secs: u64,
+) -> Result<()> {
     let subscribe_id = uuid::Uuid::new_v4().to_string();
-    let subscribe_req = build_subscribe_request(&cfg.openclaw.target_channel, &subscribe_id);
+    let subscribe_req = build_subscribe_request(target_channel, &subscribe_id);
     ws.send(Message::Text(subscribe_req.to_string()))
         .await
         .context("Kann sessions.messages.subscribe nicht senden")?;
-    let subscribe_res = read_response(&mut ws, timeout_secs, &subscribe_id).await?;
+    let subscribe_res = read_response(ws, timeout_secs, &subscribe_id).await?;
     if subscribe_res.ok != Some(true) {
         let error = subscribe_res
             .error
@@ -342,12 +399,20 @@ pub async fn run_read_only_probe(cfg: &Config) -> Result<()> {
             error.message
         );
     }
-    info!(
-        target_channel = %cfg.openclaw.target_channel,
-        "Zielkanal abonniert - protokolliere eingehende Events (Strg+C zum Beenden)"
-    );
+    info!(%target_channel, "Zielkanal abonniert");
+    Ok(())
+}
 
-    // 4. Events protokollieren, bis Strg+C oder Verbindungsende.
+/// Verbindet sich einmalig, meldet sich an, abonniert den konfigurierten
+/// Zielkanal und protokolliert Events, bis der Prozess beendet wird (Strg+C)
+/// oder die Verbindung abbricht.
+pub async fn run_read_only_probe(cfg: &Config) -> Result<()> {
+    let mut ws = connect_and_handshake(cfg).await?;
+    let timeout_secs = cfg.openclaw.timeout_secs;
+    subscribe_channel(&mut ws, &cfg.openclaw.target_channel, timeout_secs).await?;
+    info!("Protokolliere eingehende Events (Strg+C zum Beenden)");
+
+    // Events protokollieren, bis Strg+C oder Verbindungsende.
     loop {
         tokio::select! {
             frame = ws.next() => {
@@ -381,6 +446,141 @@ pub async fn run_read_only_probe(cfg: &Config) -> Result<()> {
                 info!("Beende auf Anfrage (Strg+C)");
                 return Ok(());
             }
+        }
+    }
+}
+
+/// Sammelt eine `chat`-Antwort aus den `state: "delta"`-Events zu einem
+/// `runId`. `replace: true` markiert laut Schema einen vollständigen
+/// Refresh-Delta (kompletter Ersatz statt Anhängen) - kommt in der Praxis
+/// selten vor, muss aber respektiert werden, sonst würde ein solcher Delta
+/// den bisherigen Text duplizieren statt zu korrigieren.
+#[derive(Debug, Default)]
+struct ChatTextCollector {
+    text: String,
+}
+impl ChatTextCollector {
+    fn push_delta(&mut self, delta_text: &str, replace: bool) {
+        if replace {
+            self.text.clear();
+        }
+        self.text.push_str(delta_text);
+    }
+
+    fn into_response(self) -> String {
+        self.text.trim().to_string()
+    }
+}
+
+/// Wertet genau ein `chat`-Event für den beobachteten `run_id` aus.
+/// `None` heißt "weiterlesen" (z. B. `status`-Zwischenstände oder Events zu
+/// einem anderen, gleichzeitig laufenden `runId` auf demselben Kanal -
+/// möglich, wenn derselbe Zielkanal auch von anderswo, etwa Telegram,
+/// bespielt wird). `Some(Ok(..))`/`Some(Err(..))` beenden die Runde.
+fn handle_chat_event(
+    payload: &serde_json::Value,
+    run_id: &str,
+    collector: &mut ChatTextCollector,
+) -> Option<Result<String>> {
+    if payload.get("runId").and_then(|v| v.as_str()) != Some(run_id) {
+        return None;
+    }
+    match payload.get("state").and_then(|v| v.as_str()) {
+        Some("delta") => {
+            let delta_text = payload
+                .get("deltaText")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let replace = payload
+                .get("replace")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            collector.push_delta(delta_text, replace);
+            None
+        }
+        Some("final") => Some(Ok(std::mem::take(collector).into_response())),
+        Some("aborted") => {
+            let msg = payload
+                .get("errorMessage")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ohne Angabe eines Grundes");
+            Some(Err(anyhow::anyhow!("chat.send wurde abgebrochen: {msg}")))
+        }
+        Some("error") => {
+            let msg = payload
+                .get("errorMessage")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unbekannter Fehler");
+            Some(Err(anyhow::anyhow!("chat.send-Fehler vom Gateway: {msg}")))
+        }
+        // "status" (Startphasen wie preparing_workspace) oder ein
+        // unbekannter zukünftiger Zustand: nichts zu tun, weiterlesen.
+        _ => None,
+    }
+}
+
+/// Löst über `chat.send` eine Antwort im konfigurierten Zielkanal aus und
+/// sammelt die gestreamten `deltaText`-Events zur vollständigen Antwort
+/// (0.2.2, `transport = "websocket"` - Ersatz für `openclaw agent --json`).
+///
+/// `chat.send` ist laut Protokoll non-blocking: die Antwort auf den Request
+/// selbst ist nur ein sofortiges ACK (`status: "started"`), die eigentliche
+/// Antwort kommt über `chat`-Events auf dem zuvor abonnierten Kanal. Sobald
+/// das ACK da ist, wird `on_ack` aufgerufen (typischerweise, um sofort eine
+/// gesprochene Zwischenmeldung auszulösen, siehe
+/// `OpenClawConfig::interim_message`) - erst danach wird auf die Events
+/// gewartet, damit ein Fehlschlagen von `on_ack` selbst nicht den Empfang
+/// der eigentlichen Antwort verzögert.
+pub async fn send_chat_message<F, Fut>(cfg: &Config, message: &str, on_ack: F) -> Result<String>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut ws = connect_and_handshake(cfg).await?;
+    let timeout_secs = cfg.openclaw.timeout_secs;
+    subscribe_channel(&mut ws, &cfg.openclaw.target_channel, timeout_secs).await?;
+
+    // Das selbst vergebene idempotencyKey ist laut Gateway-Quellcode
+    // identisch mit dem runId, das ACK und Events tragen (siehe Modul-Doku
+    // oben) - es muss also nicht erst aus der ACK-Antwort gelesen werden.
+    let idempotency_key = uuid::Uuid::new_v4().to_string();
+    let send_id = uuid::Uuid::new_v4().to_string();
+    let send_req = build_chat_send_request(
+        &cfg.openclaw.target_channel,
+        message,
+        &idempotency_key,
+        &send_id,
+    );
+    ws.send(Message::Text(send_req.to_string()))
+        .await
+        .context("Kann chat.send nicht senden")?;
+
+    let ack = read_response(&mut ws, timeout_secs, &send_id).await?;
+    if ack.ok != Some(true) {
+        let error = ack
+            .error
+            .context("chat.send schlug fehl, ohne einen Fehler mitzuschicken")?;
+        bail!(
+            "chat.send fehlgeschlagen ({}): {}",
+            error.code,
+            error.message
+        );
+    }
+    info!(run_id = %idempotency_key, "chat.send bestätigt (ACK) - warte auf gestreamte Antwort");
+
+    on_ack().await;
+
+    let mut collector = ChatTextCollector::default();
+    loop {
+        let frame = read_frame(&mut ws, timeout_secs).await?;
+        if frame.frame_type != "event" || frame.event.as_deref() != Some("chat") {
+            continue;
+        }
+        let Some(payload) = frame.payload else {
+            continue;
+        };
+        if let Some(outcome) = handle_chat_event(&payload, &idempotency_key, &mut collector) {
+            return outcome;
         }
     }
 }
@@ -578,5 +778,98 @@ mod tests {
         for event in ["tick", "heartbeat", "presence", "health"] {
             assert!(describe_event(event).is_none(), "{event}");
         }
+    }
+
+    /// Regression: `chat.send` erwartet `sessionKey`, nicht `key` wie
+    /// `sessions.messages.subscribe` - dieselbe Verwechslung, die schon beim
+    /// `client.id`/`mode`-Bugfix aufgefallen ist (Feldnamen zwischen
+    /// Gateway-Methoden nicht aus Analogie annehmen, sondern je Methode am
+    /// tatsächlichen Schema prüfen).
+    #[test]
+    fn chat_send_request_uses_session_key_not_key() {
+        let req = build_chat_send_request("agent:main:voice-assistant", "Hallo", "idem-1", "req-1");
+        assert_eq!(req["method"], "chat.send");
+        assert_eq!(req["params"]["sessionKey"], "agent:main:voice-assistant");
+        assert_eq!(req["params"]["message"], "Hallo");
+        assert_eq!(req["params"]["idempotencyKey"], "idem-1");
+        assert!(req["params"].get("key").is_none());
+    }
+
+    #[test]
+    fn chat_text_collector_appends_deltas_in_order() {
+        let mut collector = ChatTextCollector::default();
+        collector.push_delta("Es ist ", false);
+        collector.push_delta("kurz nach acht.", false);
+        assert_eq!(collector.into_response(), "Es ist kurz nach acht.");
+    }
+
+    /// `replace: true` markiert laut `ChatDeltaEventSchema` einen
+    /// vollständigen Refresh-Delta - der bisherige Text muss dabei ersetzt,
+    /// nicht mit dem neuen zusammengehängt werden.
+    #[test]
+    fn chat_text_collector_replace_delta_discards_previous_text() {
+        let mut collector = ChatTextCollector::default();
+        collector.push_delta("Vorläufiger Entwurf", false);
+        collector.push_delta("Endgültiger Text.", true);
+        assert_eq!(collector.into_response(), "Endgültiger Text.");
+    }
+
+    #[test]
+    fn chat_text_collector_trims_the_final_response() {
+        let mut collector = ChatTextCollector::default();
+        collector.push_delta("  Hallo Welt  \n", false);
+        assert_eq!(collector.into_response(), "Hallo Welt");
+    }
+
+    #[test]
+    fn handle_chat_event_ignores_events_for_a_different_run_id() {
+        let mut collector = ChatTextCollector::default();
+        let payload = json!({"runId": "other-run", "state": "final"});
+        assert!(handle_chat_event(&payload, "my-run", &mut collector).is_none());
+    }
+
+    #[test]
+    fn handle_chat_event_collects_deltas_and_returns_on_final() {
+        let mut collector = ChatTextCollector::default();
+        let delta = json!({"runId": "run-1", "state": "delta", "deltaText": "Hallo"});
+        assert!(handle_chat_event(&delta, "run-1", &mut collector).is_none());
+        let delta2 = json!({"runId": "run-1", "state": "delta", "deltaText": " Welt"});
+        assert!(handle_chat_event(&delta2, "run-1", &mut collector).is_none());
+
+        let done = json!({"runId": "run-1", "state": "final"});
+        let outcome = handle_chat_event(&done, "run-1", &mut collector).expect("final beendet");
+        assert_eq!(outcome.unwrap(), "Hallo Welt");
+    }
+
+    #[test]
+    fn handle_chat_event_ignores_status_events() {
+        let mut collector = ChatTextCollector::default();
+        let status = json!({"runId": "run-1", "state": "status", "phase": "preparing_workspace"});
+        assert!(handle_chat_event(&status, "run-1", &mut collector).is_none());
+    }
+
+    #[test]
+    fn handle_chat_event_turns_aborted_into_an_error() {
+        let mut collector = ChatTextCollector::default();
+        let aborted =
+            json!({"runId": "run-1", "state": "aborted", "errorMessage": "Nutzerabbruch"});
+        let outcome =
+            handle_chat_event(&aborted, "run-1", &mut collector).expect("aborted beendet");
+        assert!(outcome.is_err());
+        assert!(outcome.unwrap_err().to_string().contains("Nutzerabbruch"));
+    }
+
+    #[test]
+    fn handle_chat_event_turns_error_state_into_an_error() {
+        let mut collector = ChatTextCollector::default();
+        let error_event =
+            json!({"runId": "run-1", "state": "error", "errorMessage": "Modell nicht erreichbar"});
+        let outcome =
+            handle_chat_event(&error_event, "run-1", &mut collector).expect("error beendet");
+        assert!(outcome.is_err());
+        assert!(outcome
+            .unwrap_err()
+            .to_string()
+            .contains("Modell nicht erreichbar"));
     }
 }

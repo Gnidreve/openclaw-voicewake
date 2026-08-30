@@ -30,17 +30,6 @@ Transport-Wahl **ausschließlich über Config**, kein CLI-Flag dafür:
 transport = "cli"  # oder "websocket" - Default "cli", bestehende Configs laufen unverändert weiter
 ```
 
-### 0.2.2 - Volle Integration
-
-- `transport = "websocket"` nutzt `chat.send` statt `openclaw agent --json`
-  - laut Doku non-blocking, mit sofortigem ACK (`runId`, `status: started`).
-- Das ACK löst sofort eine Zwischenmeldung über Piper aus (Pendant zum
-  "Ich schau mir das an" aus Telegram).
-- `deltaText`-Events werden zu sprechbaren Abschnitten gesammelt, `final`
-  schließt die Runde ab.
-- `transport = "cli"` bleibt vollwertiger Legacy-Pfad, nicht nur ein
-  Fallback - beide Transporte werden dauerhaft unterstützt.
-
 Jeder Schritt ab hier bekommt seine Tests direkt beim Bauen (wie bisher:
 Unit-Tests in der Datei, ein Mock-Gateway-Feature-Test in `tests/` analog
 zu `tests/pipeline_with_stubs.rs`) - nicht erst gesammelt danach in 0.3.x.

@@ -17,7 +17,7 @@ mod wakeword;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use config::{Cli, Config};
+use config::{Cli, Config, Transport};
 use state::{State, StateMachine};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -421,28 +421,16 @@ async fn run_round(
         warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
         String::new()
     } else {
-        // Nicht kritisch für die Runde: Schlägt der Reset fehl, wird trotzdem
-        // ganz normal mit der eigentlichen Nachricht weitergemacht - ein
-        // Reset-Fehlschlag soll keine sonst funktionierende Runde abbrechen.
-        if let Err(e) = cancellable(
+        match send_to_backend(
+            cfg,
             shutdown,
-            openclaw::maybe_reset_session(&cfg.openclaw, *last_openclaw_message_at),
+            &transcript,
+            tmp_dir,
+            last_openclaw_message_at,
         )
         .await
         {
-            warn!(error = %e, "Session-Reset fehlgeschlagen - fahre trotzdem fort");
-        }
-
-        match cancellable(
-            shutdown,
-            openclaw::send_to_openclaw(&cfg.openclaw, &transcript),
-        )
-        .await
-        {
-            Ok(r) => {
-                *last_openclaw_message_at = Some(Instant::now());
-                r
-            }
+            Ok(r) => r,
             Err(e) => {
                 transcript_log::log_output(
                     &cfg.transcription_log,
@@ -505,6 +493,92 @@ async fn run_round(
     .await;
 
     Ok(RoundOutcome::Answered)
+}
+
+/// Schickt `transcript` über den konfigurierten Transport an OpenClaw und
+/// liefert den Antworttext zurück. Beide Transporte bleiben dauerhaft
+/// vollwertig unterstützt (siehe ROADMAP.md, 0.2.x) - kein Fallback des
+/// einen auf den anderen.
+///
+/// `transport = "cli"` entspricht unverändert dem bisherigen Ablauf
+/// (`openclaw agent --json` je Runde als Subprozess). `transport =
+/// "websocket"` nutzt stattdessen `chat.send`: das sofortige ACK löst über
+/// `on_ack` eine gesprochene Zwischenmeldung aus (Pendant zum "Ich schau mir
+/// das an" aus Telegram, siehe `OpenClawConfig::interim_message`), bevor auf
+/// die gestreamten `deltaText`-Events gewartet wird - `chat.send` selbst ist
+/// laut Protokoll non-blocking und liefert die eigentliche Antwort nicht
+/// direkt zurück.
+async fn send_to_backend(
+    cfg: &Config,
+    shutdown: &AtomicBool,
+    transcript: &str,
+    tmp_dir: &Path,
+    last_openclaw_message_at: &mut Option<Instant>,
+) -> Result<String> {
+    match cfg.openclaw.transport {
+        Transport::Cli => {
+            // Nicht kritisch für die Runde: Schlägt der Reset fehl, wird
+            // trotzdem ganz normal mit der eigentlichen Nachricht
+            // weitergemacht - ein Reset-Fehlschlag soll keine sonst
+            // funktionierende Runde abbrechen.
+            if let Err(e) = cancellable(
+                shutdown,
+                openclaw::maybe_reset_session(&cfg.openclaw, *last_openclaw_message_at),
+            )
+            .await
+            {
+                warn!(error = %e, "Session-Reset fehlgeschlagen - fahre trotzdem fort");
+            }
+
+            let response = cancellable(
+                shutdown,
+                openclaw::send_to_openclaw(&cfg.openclaw, transcript),
+            )
+            .await?;
+            *last_openclaw_message_at = Some(Instant::now());
+            Ok(response)
+        }
+        Transport::Websocket => {
+            // Analog zu `maybe_reset_session`, aber über `chat.send` statt
+            // das CLI - ebenso unkritisch bei Fehlschlag.
+            if openclaw::reset_due(&cfg.openclaw, *last_openclaw_message_at) {
+                info!(
+                    after_secs = cfg.openclaw.session_reset_after_secs,
+                    "Session-Reset wegen Inaktivität - sende {}",
+                    cfg.openclaw.session_reset_message
+                );
+                if let Err(e) = cancellable(
+                    shutdown,
+                    gateway_client::send_chat_message(
+                        cfg,
+                        &cfg.openclaw.session_reset_message,
+                        || async {},
+                    ),
+                )
+                .await
+                {
+                    warn!(error = %e, "Session-Reset (websocket) fehlgeschlagen - fahre trotzdem fort");
+                }
+            }
+
+            let message = openclaw::render_message(&cfg.openclaw, transcript);
+            let tts_cfg = &cfg.tts;
+            let interim_message = &cfg.openclaw.interim_message;
+            let response = cancellable(
+                shutdown,
+                gateway_client::send_chat_message(cfg, &message, || async move {
+                    if let Err(e) =
+                        tts::synthesize_and_play(tts_cfg, interim_message, tmp_dir).await
+                    {
+                        warn!(error = %e, "Konnte Zwischenmeldung nicht abspielen - fahre trotzdem fort");
+                    }
+                }),
+            )
+            .await?;
+            *last_openclaw_message_at = Some(Instant::now());
+            Ok(response)
+        }
+    }
 }
 
 /// Nimmt bis Stille/Timeout auf und schreibt das Ergebnis nach `out_path`.

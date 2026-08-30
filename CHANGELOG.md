@@ -14,6 +14,32 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-30
+
+### Hinzugefügt
+
+- `transport = "websocket"` sendet jetzt echte Nachrichten über `chat.send`
+  statt nur lesend zu abonnieren (`gateway_client::send_chat_message`) -
+  Ersatz für `openclaw agent --json` auf diesem Transport. `chat.send` ist
+  laut Gateway-Protokoll non-blocking: die Antwort auf den Request selbst
+  ist nur ein sofortiges ACK (`status: "started"`); sobald es ankommt, wird
+  die neue, nur für diesen Transport relevante `interim_message` gesprochen
+  (Pendant zum "Ich schau mir das an" aus Telegram), während im Hintergrund
+  auf die gestreamten `chat`-Events mit der eigentlichen Antwort gewartet
+  wird. Deren `deltaText`-Felder werden zur vollständigen Antwort gesammelt
+  (`replace: true` respektiert), ein `final`-Event schließt die Runde ab,
+  `aborted`/`error` werden zu einem Fehler.
+- Session-Resets (`session_reset_after_secs`) funktionieren jetzt auch über
+  `transport = "websocket"` - über `chat.send` statt einen CLI-Aufruf,
+  ansonsten unverändertes Verhalten.
+- `transport = "cli"` bleibt unverändert vollwertiger Weg, kein Fallback -
+  beide Transporte werden dauerhaft unterstützt.
+- Neuer Mock-Gateway-Feature-Test (`tests/pipeline_websocket_with_stubs.rs`,
+  analog zu `tests/pipeline_with_stubs.rs`), der den kompletten Ablauf vom
+  Dry-Run-Transkript bis zur aus `deltaText`-Events zusammengesetzten,
+  gesprochenen Antwort abdeckt - inklusive der Reihenfolge
+  Zwischenmeldung-vor-Antwort.
+
 ## [0.2.1] - 2026-08-30
 
 ### Behoben
@@ -452,7 +478,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.14...v0.2.0
 [0.1.14]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...v0.1.14
