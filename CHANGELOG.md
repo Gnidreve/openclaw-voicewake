@@ -14,6 +14,16 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-08-30
+
+### Hinzugefügt
+
+- Fehlerton für `[Output] skipped`, wenn zuvor tatsächlich ein Transkript an
+  OpenClaw abgeschickt wurde, aber keine Antwort zurückkam - vorher blieb
+  dieser Fall akustisch unbemerkt. Der Fall "nichts erkannt, nichts
+  abgeschickt" bleibt bewusst ohne Ton: Dort ist das Ausbleiben des
+  Absende-Tons bereits das Signal.
+
 ## [0.1.12] - 2026-08-30
 
 ### Hinzugefügt
@@ -376,7 +386,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...v0.1.10
