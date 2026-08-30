@@ -12,12 +12,28 @@ Audioaufzeichnung.
 
 ## Zustandsmaschine
 
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> LISTENING_FOR_WAKEWORD
+
+    LISTENING_FOR_WAKEWORD --> RECORDING: Wake-Word erkannt
+    LISTENING_FOR_WAKEWORD --> IDLE: Fehler/Shutdown
+
+    RECORDING --> TRANSCRIBING: Stille/Timeout erkannt
+    RECORDING --> IDLE: Fehler
+
+    TRANSCRIBING --> SENDING_TO_OPENCLAW
+    TRANSCRIBING --> IDLE: Fehler
+
+    SENDING_TO_OPENCLAW --> SPEAKING: Antwort erhalten
+    SENDING_TO_OPENCLAW --> IDLE: Fehler
+
+    SPEAKING --> RECORDING: Folgeeingabe (kein Wake-Word nötig)
+    SPEAKING --> IDLE: Kanal geschlossen
 ```
-IDLE → LISTENING_FOR_WAKEWORD → RECORDING → TRANSCRIBING
-     → SENDING_TO_OPENCLAW → SPEAKING → IDLE
-                                 │
-                                 └──→ RECORDING (Folgeeingabe, kein Wake-Word nötig)
-```
+
+Entspricht 1:1 den in `src/state.rs::allowed_next()` erlaubten Übergängen.
 
 Jeder Zwischenzustand kann bei Fehlern/Timeouts direkt zurück nach `IDLE`
 springen, damit der Dienst nicht hängen bleibt. Während `SPEAKING` läuft
