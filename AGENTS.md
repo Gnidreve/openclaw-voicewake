@@ -83,7 +83,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 | `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
-| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, Event-Log (0.2.0: rein lesend) |
+| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`) |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
@@ -234,6 +234,19 @@ den Nutzer) ist deshalb Pflicht, keine Optimierung.
 hat deshalb ein eigenes, redigierendes `Debug` statt des abgeleiteten -
 ein künftiges weiteres Secret-Feld braucht denselben Wrapper, nicht ein
 rohes `String`.
+
+**Gateway-Methoden benennen ihr Session-Zielfeld nicht einheitlich - pro
+Methode am Schema prüfen, nicht von einer anderen Methode übernehmen.**
+`sessions.messages.subscribe` erwartet `params.key`, `chat.send` dagegen
+`params.sessionKey` - dieselbe Art Verwechslung, die schon beim
+`client.id`/`client.mode`-Bug aus 0.2.1 aufgefallen ist. Ein `chat.send`
+mit `key` statt `sessionKey` schlägt nicht mit einem offensichtlichen
+Fehler fehl, sondern mit `INVALID_REQUEST` gegen ein Schema, das
+`sessionKey` als Pflichtfeld verlangt. Umgekehrt ist `chat.send`s
+`idempotencyKey` laut Quellcode (`chat-send-session.ts`: `clientRunId =
+p.idempotencyKey`) identisch mit dem `runId`, das ACK und alle folgenden
+`chat`-Events tragen - das selbst vergebene UUID muss deshalb nicht aus
+der Server-Antwort zurückgelesen werden, um eigene Events zu erkennen.
 
 ## Konfiguration
 

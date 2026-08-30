@@ -146,6 +146,11 @@ gateway_port = 18789
 # läuft. Ein gültiges Token reicht allein NICHT für vollen Zugriff - siehe
 # den Hinweis zur Geräte-Kopplung unten.
 # gateway_token = "das-gemeinsame-gateway-token"
+# Nur relevant bei transport = "websocket": wird direkt gesprochen, sobald
+# chat.send sein ACK liefert (chat.send ist non-blocking, die eigentliche
+# Antwort kommt erst über gestreamte Events nach) - das Pendant zum "Ich
+# schau mir das an" aus Telegram.
+interim_message = "Einen Moment, ich schaue nach."
 
 # Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:
 # binary = "/opt/homebrew/bin/openclaw"
