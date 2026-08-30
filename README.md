@@ -169,7 +169,7 @@ Dateiname des Archivs leiten sich daraus ab. Ein Release entsteht also so:
 version = "1.0.0"
 ```
 
-Diese Änderung nach `main` bringen - fertig. Der Workflow
+Diese Änderung per Pull Request von `dev` nach `main` mergen - fertig. Der Workflow
 (`.github/workflows/build-macos.yml`) erkennt beim Push nach `main`, dass
 zur Version aus `Cargo.toml` noch kein Tag existiert, baut auf macOS, legt
 `v1.0.0` an und veröffentlicht die Release mit

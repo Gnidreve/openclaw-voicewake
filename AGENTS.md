@@ -175,12 +175,12 @@ Zwei Konventionen:
   Absicht: Er schlägt fehl, sobald eine Konfiguration ein früheres Skript
   nicht mehr ersetzen könnte.
 
-## Release
+## GitHub: Branches, PRs, CI, Release
 
-Die Version in `Cargo.toml` ist die einzige Quelle. Erhöhen und nach `main`
-mergen erzeugt Tag, Release und ZIP; Details im
-[Release-Abschnitt der README](README.md#release). Ein Tag, der nicht zu
-`Cargo.toml` passt, bricht den Workflow ab.
+Alles, was sich auf GitHub als Plattform bezieht statt auf den Rust-Code,
+steht in [`.github/AGENTS.md`](.github/AGENTS.md) - Branch-Policy
+(ausschließlich `dev`, PRs statt Direkt-Push nach `main`), Pull-Request-
+Vorlage, die beiden CI-Workflows und wie ein Release entsteht.
 
 ## Ideen, Roadmap, Changelog
 
