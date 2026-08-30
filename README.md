@@ -15,22 +15,40 @@ Audioaufzeichnung.
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
+
     IDLE --> LISTENING_FOR_WAKEWORD
-
     LISTENING_FOR_WAKEWORD --> RECORDING: Wake-Word erkannt
-    LISTENING_FOR_WAKEWORD --> IDLE: Fehler/Shutdown
-
-    RECORDING --> TRANSCRIBING: Stille/Timeout erkannt
-    RECORDING --> IDLE: Fehler
-
+    RECORDING --> TRANSCRIBING: Stille-Uhr abgelaufen
     TRANSCRIBING --> SENDING_TO_OPENCLAW
-    TRANSCRIBING --> IDLE: Fehler
+    SENDING_TO_OPENCLAW --> SPEAKING
 
-    SENDING_TO_OPENCLAW --> SPEAKING: Antwort erhalten
+    SPEAKING --> RECORDING: Antwort vorgelesen, Folgerunde erlaubt
+    SPEAKING --> IDLE: keine Antwort oder Rundenlimit erreicht
+
+    LISTENING_FOR_WAKEWORD --> IDLE: Abbruch
+    RECORDING --> IDLE: Fehler
+    TRANSCRIBING --> IDLE: Fehler
     SENDING_TO_OPENCLAW --> IDLE: Fehler
 
-    SPEAKING --> RECORDING: Folgeeingabe (kein Wake-Word nötig)
-    SPEAKING --> IDLE: Kanal geschlossen
+    note right of RECORDING
+        Glass-Ton läuft VOR dem Öffnen
+        des Mikrofons, danach mic_open_delay_ms.
+        Eine Uhr (silence_timeout_ms) beendet
+        die Aufnahme - Sprechen setzt sie zurück.
+    end note
+
+    note right of TRANSCRIBING
+        Ohne erkannte Sprache wird whisper
+        gar nicht erst aufgerufen.
+        Glass-Ton am Ende nur, wenn etwas
+        gesendet wird - sein Ausbleiben ist
+        das Signal "nichts verstanden".
+    end note
+
+    note right of SENDING_TO_OPENCLAW
+        Leeres oder gefiltertes Transkript
+        überspringt den OpenClaw-Aufruf.
+    end note
 ```
 
 Entspricht 1:1 den in `src/state.rs::allowed_next()` erlaubten Übergängen.
