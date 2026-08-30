@@ -1,0 +1,263 @@
+# Changelog
+
+Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
+
+Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
+die Versionierung an [Semantic Versioning](https://semver.org/lang/de/).
+
+Die Version in `Cargo.toml` ist die einzige Quelle: Sie anzuheben und nach
+`main` zu mergen erzeugt Tag, Release und ZIP.
+
+## [Unreleased]
+
+## [0.1.5] - 2026-08-29
+
+Beide Shell-Adapter (`openclaw-adapter.sh`, `piper-adapter.sh`) werden
+überflüssig - ihre Logik steht jetzt vollständig in der `config.toml`.
+
+> **Migration erforderlich.** Reihenfolge: erst Binary tauschen, dann Config
+> anpassen. Andersherum ignoriert das alte Binary die neuen Schlüssel.
+> Bestehende `timeout_secs` übernehmen, **nicht** die Beispielwerte aus
+> `config.example.toml`.
+
+### Hinzugefügt
+
+- `tts.args` und `tts.binary`: vollständige Piper-Argumentliste mit den
+  Platzhaltern `{output}` (Pflicht) und `{voice}`. Damit ist auch eine
+  venv-Installation ansprechbar, bei der `-m piper` vor allen anderen
+  Argumenten stehen muss.
+- `openclaw.args`: vollständige Argumentliste mit `{channel}` und `{message}`
+  (beide Pflicht). Der Flag-Name für den Zielkanal steht damit in der Config -
+  `--channel` bei einfachen Adaptern, `--session-key` beim echten CLI.
+- `openclaw.message_template`: Umschlag um das Transkript mit `{transcript}`
+  (Pflicht). Formregeln für die Sprachausgabe sind Inhalt und gehören in die
+  Konfiguration, nicht in kompilierten Code.
+- Auswertung der JSON-Antwort in Rust (`serde_json`): `result.payloads[0].text`,
+  ersatzweise `reply`/`text`/`message`/`content`, sonst die Rohausgabe. Ein
+  externer JSON-Parser wird nicht mehr gebraucht.
+- Startvalidierung für alle vier Platzhalter - fehlt einer, bricht der Start
+  mit klarer Meldung ab, statt später still das Falsche zu tun.
+- `AGENTS.md`: Invarianten des Projekts mit ihrer Begründung, Modulkarte,
+  Konfigurationsprinzip, Testkonventionen, offene Punkte.
+- `tests/pipeline_with_stubs.rs`: spielt bei jedem `cargo test` eine
+  vollständige Runde gegen selbst erzeugte Stub-Programme durch - ohne macOS,
+  Mikrofon, Whisper-Modell oder OpenClaw. Die Stubs weisen eine falsche
+  Aufrufform mit Exit-Code 3 zurück.
+
+### Behoben
+
+- `openclaw.target_channel` steuerte den Zielkanal nicht. Der Adapter verwarf
+  `--channel` und hatte die Session hartkodiert; die Prüfung auf einen leeren
+  Wert bewachte damit einen Wert ohne Wirkung.
+
+### Entfernt
+
+- `tts.piper_binary`, `tts.model_path`, `tts.extra_args` - durch die
+  vollständige Argumentliste überflüssig.
+- `openclaw.extra_args` - ebenso.
+
+### Migration
+
+```toml
+[tts]
+binary = "/pfad/zum/piper-venv/bin/python3"
+voice = "de_DE-thorsten-high"
+args = ["-m", "piper",
+        "--data-dir", "/pfad/zu/piper-voices",
+        "-m", "{voice}",
+        "-f", "{output}"]
+player_binary = "afplay"
+timeout_secs = 60          # bisherigen Wert übernehmen
+
+[openclaw]
+binary = "/opt/homebrew/bin/openclaw"
+target_channel = "agent:main:voice-assistant"   # VOLLER Session-Key, nicht der Kurzname
+args = ["agent",
+        "--model", "deepseek/deepseek-v4-flash",
+        "--session-key", "{channel}",
+        "--message", "{message}",
+        "--thinking", "low",
+        "--json"]
+message_template = """
+[Maschinengenerierte Eingabe aus der lokalen Voice-Bridge]
+
+Zusatzregel für diese Antwort: Formuliere auf Deutsch in gut vorlesbaren,
+kompakten Sätzen. Verwende keine Emojis, Smileys oder dekorative
+Sonderzeichen. Diese Zusatzregel gilt nur für die Form der Antwort, nicht
+als Inhalt der Benutzernachricht.
+
+Transkript des Benutzers:
+---
+{transcript}
+---
+"""
+timeout_secs = 180         # bisherigen Wert übernehmen
+```
+
+Danach können beide `.sh`-Adapter gelöscht werden. Der Wake-Word-Listener
+bleibt unverändert eingebunden. Alte Schlüssel werden ignoriert - bleibt ein
+Abschnitt unverändert, scheitert der Start sofort sichtbar.
+
+## [0.1.4] - 2026-08-29
+
+> **Migration erforderlich:** Das Binary heißt jetzt `openclaw-voicebridge`
+> statt `claw-voice-bridge`. Startskripte, Launch Agents und Aliase anpassen.
+
+### Geändert
+
+- Paket und Binary heißen `openclaw-voicebridge`. Der Release-Workflow liest
+  Name **und** Version aus `Cargo.toml`; in CI steht kein Produktname mehr
+  fest verdrahtet. Die Sperrdatei heißt entsprechend
+  `openclaw-voicebridge.lock` - eine noch laufende alte Instanz blockiert eine
+  neue daher nicht, beim Umstieg zuerst die alte beenden.
+- Das Release-Archiv heißt `openclaw-voicebridge-<version>-macos.zip` statt
+  eines versionslosen Namens; Downloads verschiedener Releases sind damit
+  unterscheidbar.
+- Eine Gesprächsrunde ist genau eine Funktion (`run_round`). Wake-Word und
+  Folgerunde unterscheiden sich nur noch darin, wer sie aufruft - beim
+  Debuggen taugt die erste Runde als Referenz für alle weiteren.
+- Der Stille-Timeout gilt ab dem ersten Frame. „Niemand hat gesprochen" endet
+  über denselben Weg und nach derselben Zeit wie „jemand hat aufgehört zu
+  sprechen"; Sprechen verzögert das Ende nur, indem es die Uhr zurücksetzt.
+- `vad.max_recording_seconds` ist keine Längenbegrenzung für Sprache mehr,
+  sondern ein Sicherheitsnetz gegen unbegrenztes Puffer-Wachstum bei
+  Dauergeräusch. Standard von 60 auf 300 Sekunden angehoben, `0` schaltet es
+  ab. Ein bestehender Wert von 60 kann bleiben.
+
+### Hinzugefügt
+
+- Release-Automatik: Version in `Cargo.toml` erhöhen und nach `main` mergen
+  erzeugt Tag, Release und ZIP. Ohne Versionsänderung passiert nichts - ein
+  vorgeschalteter Ubuntu-Job entscheidet das, damit nicht jeder Merge einen
+  macOS-Runner startet.
+- Ein Tag, dessen Version nicht zu `Cargo.toml` passt, bricht den Workflow mit
+  klarer Meldung ab, statt unter falscher Nummer zu veröffentlichen.
+
+### Behoben
+
+- Eine Runde ohne jede Sprache lief bis `max_recording_seconds` - also eine
+  volle Minute -, bevor sie endete. Jetzt endet sie nach dem regulären
+  Stille-Timeout (Standard 4 Sekunden).
+
+## [0.1.3] - 2026-08-26
+
+Behebt die **Ursache** des Halluzinations-Loops, den 0.1.2 nur abgefangen hat.
+
+### Behoben
+
+- Der Start-Ton landete in der eigenen Aufnahme. Bei einem Speakerphone
+  (Lautsprecher und Mikrofon im selben Gerät) lag er lauter und länger als
+  `vad.min_speech_ms` an, wodurch die VAD bei **jeder** Aufnahme „Sprache
+  erkannt" meldete. Der Whisper-Skip für stille Aufnahmen konnte deshalb nie
+  greifen, Whisper halluzinierte aus faktischer Stille Text, und der ging als
+  Eingabe zurück in den offenen Kanal. Der Ton läuft jetzt **vor** dem Öffnen
+  des Mikrofons, der Ende-Ton erst nach dem Schließen.
+- `vad.min_speech_ms` maß nicht zusammenhängende Sprache: Der Zähler wurde nie
+  zurückgesetzt, sodass sich verstreute laute Frames über die gesamte Aufnahme
+  zu „Sprache" aufaddierten. Bei 30-ms-Frames genügten zehn Frames irgendwo in
+  bis zu 60 Sekunden.
+
+### Hinzugefügt
+
+- `audio.mic_open_delay_ms` (Standard 200): Pause zwischen Start-Ton und dem
+  Öffnen des Mikrofons, für das Ausklingen von Lautsprecher und Raum. Schützt
+  in der Folgerunde auch davor, dass das Ende einer vorgelesenen Antwort in
+  die nächste Aufnahme blutet.
+- `vad.speech_gap_ms` (Standard 200): zusammenhängende Stille, nach der ein
+  laufender Sprach-Abschnitt als beendet gilt. Kurze Silbenpausen brechen ihn
+  nicht ab.
+
+### Geändert
+
+- Die Ton-Sprache hat jetzt zwei Signale mit fester Bedeutung: Glass beim
+  Start („sprich"), Glass am Ende („erkannt, wird gesendet"), Basso bei
+  Fehlern. **Bleibt der Ton am Ende aus, wurde nichts erkannt und nichts
+  abgeschickt** - das Ausbleiben ist selbst das Signal.
+
+### Entfernt
+
+- Der dritte, gleich klingende „Kanal geschlossen"-Ton. Er war redundant: Ob
+  der Kanal nach einer Antwort noch offen ist, hört man daran, ob ein neuer
+  Start-Ton kommt.
+
+## [0.1.2] - 2026-08-26
+
+Erste Reaktion auf den Feldtest-Bericht: fängt die Symptome des
+Halluzinations-Loops ab. Die Ursache folgt in 0.1.3.
+
+### Hinzugefügt
+
+- Einzelinstanz-Sperre über `flock`. Zwei parallel laufende Bridges starteten
+  je einen eigenen Wake-Word-Listener und griffen gleichzeitig auf dasselbe
+  Mikrofon zu. Ein zweiter Start bricht jetzt mit Nennung der laufenden PID
+  ab. Der Sperrpfad ist bewusst nicht konfigurierbar - Parallelbetrieb ist
+  nicht vorgesehen.
+- `conversation.max_followup_turns` (Standard 3): begrenzt den offenen Kanal
+  auch dann, wenn jede Runde eine Antwort erzeugt. Ohne diese Grenze halten
+  Fremdgeräusche im Raum - im Feldtest ein laufender Fernseher - den Kanal
+  beliebig lange offen. `0` schaltet Folgeeingaben ab.
+- `transcript_filter.ignored_patterns`: verwirft Transkripte mit den typischen
+  Whisper-Abspann-Halluzinationen (`Untertitelung des ZDF, 2020` u. a.) wie
+  „keine Sprache" - kein OpenClaw-Aufruf, Log-Zeile `[Input] ignored: …`.
+- `sound.error_chime_path` (Standard macOS „Basso"): hörbar unterscheidbarer
+  Ton, wenn ein Zyklus nach erkanntem Wake-Word abbricht. Fehler während der
+  Wake-Word-Erkennung selbst bleiben stumm, sonst würde der Neustart-Loop
+  dauerhaft piepen.
+- Release-Build läuft auch beim Ereignis „Release veröffentlicht", nicht nur
+  beim Tag-Push.
+
+## [0.1.1] - 2026-08-26
+
+### Hinzugefügt
+
+- Chat-artiges Transcription-Log (`[Input] …` / `[Output] …`) zusätzlich zu den
+  strukturierten Logs, abschaltbar über `transcription_log.enabled`.
+- Release-Automatik: Ein Tag `v*.*.*` baut die macOS-Binary und veröffentlicht
+  ein GitHub-Release mit ZIP.
+
+### Behoben
+
+- Whisper wurde auch dann aufgerufen, wenn die VAD nie echte Sprache erkannt
+  hatte. Aus reiner Stille halluzinierte es nicht-leeren Text, wodurch die
+  „leeres Transkript"-Prüfung ins Leere lief und sich die Folgerunden-Schleife
+  aufschaukelte. Ohne erkannte Sprache werden ffmpeg-Normalisierung und
+  whisper-cli jetzt komplett übersprungen.
+
+### Geändert
+
+- Roh- und normalisierte Aufnahme werden gelöscht, sobald sie ihren Zweck
+  erfüllt haben - nicht erst am Zyklusende und unabhängig davon, wie der
+  OpenClaw-Aufruf ausgeht.
+
+## [0.1.0] - 2026-08-24
+
+Erste Veröffentlichung.
+
+### Hinzugefügt
+
+- Lokaler macOS-Sprachdienst: Wake-Word → Mikrofon → VAD/Stille-Erkennung →
+  whisper.cpp → OpenClaw-CLI → Piper-TTS → Lautsprecher. Alles über lokale
+  Prozesse, keine Cloud-API.
+- Zustandsmaschine mit Recovery nach `IDLE` aus jedem Zwischenzustand.
+- Offener Kanal für Folgeeingaben: Nach einer vorgelesenen Antwort ist ohne
+  erneutes Wake-Word eine weitere Eingabe möglich.
+- Bestätigungstöne bei Aufnahme-Start und -Ende.
+- `--dry-run` mit `--dry-run-file` als Ersatz für die Mikrofonaufnahme.
+- Manuell auslösbarer GitHub-Actions-Workflow für den macOS-Release-Build.
+
+### Behoben
+
+- SIGINT/SIGTERM wurden beim Warten auf das Wake-Word nicht beachtet - dem
+  häufigsten Ruhezustand -, der Dienst ließ sich dort nicht sauber beenden.
+- Kindprozesse (ffmpeg, whisper-cli, OpenClaw, Piper, afplay) wurden bei
+  Timeout nicht beendet, sondern verwaisten.
+- `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
+  dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
+
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Gnidreve/openclaw-voicewake/releases/tag/v0.1.0
