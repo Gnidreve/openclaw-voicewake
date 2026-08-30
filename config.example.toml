@@ -130,6 +130,22 @@ session_reset_after_secs = 3600
 # Wird unverändert (ohne message_template-Umschlag) als eigenständige
 # Nachricht geschickt.
 session_reset_message = "/new"
+# "cli" (Standard, siehe oben) oder "websocket" (spricht direkt mit dem
+# Gateway, siehe unten) - beide werden dauerhaft unterstützt, keiner ist nur
+# ein Fallback für den anderen.
+transport = "cli"
+# Nur relevant bei transport = "websocket". Muss nicht 127.0.0.1 sein: ein
+# Gateway auf einem anderen Rechner im selben Tailnet/LAN oder über einen
+# SSH-Tunnel ist ebenfalls gültig, solange die Gateway-eigene Authentifizierung
+# (siehe gateway_token) das zulässt.
+gateway_host = "127.0.0.1"
+# Port des Gateways - 18789 ist OpenClaws eigener Standardport.
+gateway_port = 18789
+# Gemeinsames Gateway-Token (gateway.auth.token auf der OpenClaw-Seite). Leer
+# = kein Token, nur zulässig, wenn das Gateway mit gateway.auth.mode = "none"
+# läuft. Ein gültiges Token reicht allein NICHT für vollen Zugriff - siehe
+# den Hinweis zur Geräte-Kopplung unten.
+# gateway_token = "das-gemeinsame-gateway-token"
 
 # Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:
 # binary = "/opt/homebrew/bin/openclaw"

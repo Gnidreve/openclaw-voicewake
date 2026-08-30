@@ -82,6 +82,8 @@ Mikrofonaufnahme, der Rest läuft real.
 | `child_process.rs` | Prozessgruppen-Guard gegen verwaiste Enkelprozesse |
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
+| `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
+| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, Event-Log (0.2.0: rein lesend) |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
@@ -191,6 +193,30 @@ ankommen, sondern als dessen Text verpackt in der Formregel.
 `openclaw::send_raw_to_openclaw` setzt `{message}` deshalb direkt, ohne
 `render_message`.
 
+**Der Gateway-Signaturvertrag in `device_identity.rs` ist kein eigener
+Entwurf.** Payload-Format (`build_device_auth_payload_v3`), Byte-Kodierung
+(Base64url ohne Padding) und die Device-ID-Ableitung (SHA-256 über die
+rohen Public-Key-Bytes) sind 1:1 aus dem tatsächlichen OpenClaw-Quellcode
+übernommen (`packages/gateway-client/src/device-auth.ts`,
+`src/infra/device-identity.ts`, `src/infra/ed25519-signature.ts`). Eine
+Änderung ohne erneuten Abgleich mit dem OpenClaw-Server-Code liefert keinen
+Kompilier- oder Laufzeitfehler, sondern nur eine vom Gateway lautlos
+abgelehnte Signatur.
+
+**Ein gültiges `gateway_token` reicht für den Gateway-WebSocket-Transport
+nicht aus.** Ohne signierte Geräteidentität setzt das Gateway angeforderte
+Scopes auf leer zurück (verifiziert im Quellcode, nicht nur in der
+Doku) - `sessions.messages.subscribe`/`chat.send` schlagen dann mit
+`MISSING_SCOPE` fehl, obwohl der Connect-Handshake selbst noch erfolgreich
+aussieht. Der volle Weg (Ed25519-Geräteidentität + signierter
+`connect`-Request + einmalige `openclaw devices approve`-Genehmigung durch
+den Nutzer) ist deshalb Pflicht, keine Optimierung.
+
+**Secrets in `Config` dürfen nie über `{:?}` durchsickern.** `GatewayToken`
+hat deshalb ein eigenes, redigierendes `Debug` statt des abgeleiteten -
+ein künftiges weiteres Secret-Feld braucht denselben Wrapper, nicht ein
+rohes `String`.
+
 ## Konfiguration
 
 **Alles, was ohne Neukompilierung änderbar ist und je nach Setup andere
@@ -228,7 +254,17 @@ Zwei Konventionen:
   `tests/pipeline_with_stubs.rs`), muss der eigentliche Programmstart durch
   einen gemeinsamen `Mutex` serialisiert werden: Der Einzelinstanz-Sperrpfad
   ist fest (siehe oben), zwei parallel gestartete Testprozesse würden sich
-  sonst gegenseitig die Sperre streitig machen.
+  sonst gegenseitig die Sperre streitig machen. `--probe-gateway` betrifft
+  das nicht - der Probe-Pfad läuft bewusst vor der Sperre.
+* Für den Gateway-WebSocket-Client (`tests/gateway_probe_with_mock_server.rs`)
+  läuft statt eines Stub-Skripts ein echter lokaler `tokio-tungstenite`-
+  WS-Server im Testprozess, der den Handshake server-seitig mit einer vom
+  Produktionscode unabhängigen Implementierung nachrechnet (insbesondere die
+  Ed25519-Signatur) - ein Fehler im Payload-Aufbau soll nicht auf beiden
+  Seiten gleichermaßen unbemerkt bleiben. Die getestete Binary bekommt ein
+  isoliertes `$HOME` (temporäres Verzeichnis) übergeben, damit ihre
+  Geräteidentität nicht mit einer echten unter `~/.openclaw-voicebridge/`
+  kollidiert.
 
 ## GitHub: Branches, PRs, CI, Release
 

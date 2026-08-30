@@ -187,6 +187,47 @@ impl Default for WhisperConfig {
     }
 }
 
+/// Wie das Transkript an OpenClaw übergeben wird. `Cli` bleibt der
+/// vollwertige Legacy-Pfad (siehe `openclaw.rs`), `Websocket` spricht direkt
+/// mit dem Gateway (siehe `gateway_client.rs`) - beide werden dauerhaft
+/// unterstützt, keiner ist ein reiner Fallback für den anderen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Transport {
+    #[default]
+    Cli,
+    Websocket,
+}
+
+/// Wrapper um das Gateway-Token, damit das automatisch abgeleitete
+/// `#[derive(Debug)]` von `OpenClawConfig` es nicht versehentlich in Logs
+/// oder Fehlermeldungen ausgibt.
+#[derive(Clone, Deserialize, Default)]
+#[serde(transparent)]
+pub struct GatewayToken(String);
+impl GatewayToken {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+impl From<String> for GatewayToken {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl std::fmt::Debug for GatewayToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            write!(f, "GatewayToken(<leer>)")
+        } else {
+            write!(f, "GatewayToken(<redacted>)")
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OpenClawConfig {
@@ -215,6 +256,20 @@ pub struct OpenClawConfig {
     pub session_reset_after_secs: u64,
     /// Nachricht, die für den Session-Reset an OpenClaw geschickt wird.
     pub session_reset_message: String,
+    /// `"cli"` (Standard) oder `"websocket"`. Siehe `Transport`.
+    pub transport: Transport,
+    /// Hostname/IP des Gateways - nur relevant bei `transport = "websocket"`.
+    /// Muss nicht `127.0.0.1` sein: Ein Gateway auf einem anderen Rechner im
+    /// selben Tailnet/LAN oder über einen SSH-Tunnel ist ebenfalls gültig,
+    /// solange die Gateway-eigene Authentifizierung das zulässt (siehe
+    /// `gateway_token`).
+    pub gateway_host: String,
+    /// Port des Gateways - Standard `18789` (OpenClaws eigener Standardport).
+    pub gateway_port: u16,
+    /// Gemeinsames Gateway-Token (`gateway.auth.token` auf der
+    /// OpenClaw-Seite). Leer = kein Token (nur zulässig, wenn das Gateway mit
+    /// `gateway.auth.mode = "none"` läuft).
+    pub gateway_token: GatewayToken,
 }
 impl Default for OpenClawConfig {
     fn default() -> Self {
@@ -231,6 +286,10 @@ impl Default for OpenClawConfig {
             timeout_secs: 30,
             session_reset_after_secs: 3600,
             session_reset_message: "/new".to_string(),
+            transport: Transport::Cli,
+            gateway_host: "127.0.0.1".to_string(),
+            gateway_port: 18789,
+            gateway_token: GatewayToken::default(),
         }
     }
 }
@@ -478,6 +537,19 @@ impl Config {
             );
         }
 
+        if self.openclaw.transport == Transport::Websocket {
+            if self.openclaw.gateway_host.trim().is_empty() {
+                anyhow::bail!(
+                    "openclaw.gateway_host ist leer, obwohl transport = \"websocket\" gesetzt ist."
+                );
+            }
+            if self.openclaw.gateway_port == 0 {
+                anyhow::bail!(
+                    "openclaw.gateway_port ist 0, obwohl transport = \"websocket\" gesetzt ist."
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -505,6 +577,13 @@ pub struct Cli {
     /// Führt nur einen einzigen Zyklus aus und beendet sich danach.
     #[arg(long)]
     pub once: bool,
+
+    /// Diagnose-Werkzeug für `transport = "websocket"`: verbindet sich
+    /// einmalig mit dem Gateway, abonniert `openclaw.target_channel` und
+    /// protokolliert eingehende Events, ohne Mikrofon/Wake-Word/Piper
+    /// anzufassen. Beendet sich mit Strg+C.
+    #[arg(long)]
+    pub probe_gateway: bool,
 }
 
 #[cfg(test)]
@@ -695,6 +774,73 @@ mod tests {
     }
 
     #[test]
+    fn transport_defaults_to_cli_with_localhost_gateway() {
+        let cfg = OpenClawConfig::default();
+        assert_eq!(cfg.transport, Transport::Cli);
+        assert_eq!(cfg.gateway_host, "127.0.0.1");
+        assert_eq!(cfg.gateway_port, 18789);
+        assert!(cfg.gateway_token.is_empty());
+    }
+
+    #[test]
+    fn websocket_transport_parses_a_custom_host_and_port() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [openclaw]
+            target_channel = "voice-assistant"
+            transport = "websocket"
+            gateway_host = "100.64.1.5"
+            gateway_port = 4711
+            gateway_token = "shared-secret"
+            "#,
+        )
+        .expect("Konfiguration sollte parsen");
+        assert_eq!(cfg.openclaw.transport, Transport::Websocket);
+        assert_eq!(cfg.openclaw.gateway_host, "100.64.1.5");
+        assert_eq!(cfg.openclaw.gateway_port, 4711);
+        assert_eq!(cfg.openclaw.gateway_token.as_str(), "shared-secret");
+    }
+
+    #[test]
+    fn validate_rejects_empty_gateway_host_when_transport_is_websocket() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.transport = Transport::Websocket;
+        cfg.openclaw.gateway_host = String::new();
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("gateway_host"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_zero_gateway_port_when_transport_is_websocket() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.transport = Transport::Websocket;
+        cfg.openclaw.gateway_port = 0;
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("gateway_port"), "{err}");
+    }
+
+    #[test]
+    fn validate_ignores_gateway_fields_when_transport_is_cli() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.gateway_host = String::new();
+        cfg.openclaw.gateway_port = 0;
+        assert!(cfg.validate(true).is_ok());
+    }
+
+    /// Ein Gateway-Token ist ein Geheimnis - `{:?}` darf es nie im Klartext
+    /// preisgeben (z. B. wenn `Config` versehentlich in einer Fehlermeldung
+    /// oder einem Debug-Log landet).
+    #[test]
+    fn gateway_token_debug_output_never_contains_the_token_value() {
+        let token = GatewayToken("super-secret-value".to_string());
+        let debug_output = format!("{token:?}");
+        assert!(!debug_output.contains("super-secret-value"));
+    }
+
+    #[test]
     fn shipped_example_config_still_parses_and_validates() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.example.toml");
         let cfg = Config::load(&path).expect("config.example.toml sollte ladbar sein");
@@ -726,5 +872,12 @@ mod tests {
         assert!(!cli.dry_run);
         assert_eq!(cli.config, PathBuf::from("config.toml"));
         assert!(!cli.once);
+        assert!(!cli.probe_gateway);
+    }
+
+    #[test]
+    fn cli_parses_probe_gateway_flag() {
+        let cli = Cli::parse_from(["openclaw-voicebridge", "--probe-gateway"]);
+        assert!(cli.probe_gateway);
     }
 }
