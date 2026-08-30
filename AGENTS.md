@@ -203,6 +203,24 @@ rohen Public-Key-Bytes) sind 1:1 aus dem tatsächlichen OpenClaw-Quellcode
 Kompilier- oder Laufzeitfehler, sondern nur eine vom Gateway lautlos
 abgelehnte Signatur.
 
+**`client.id`/`client.mode` im Connect-Request sind geschlossene Enums,
+keine freien Strings - und die Doku-Beispiele stimmen darin nicht
+zuverlässig mit dem tatsächlichen Schema überein.** Regression aus dem
+0.2.0-Feldtest: Das Protokoll-Doku-Beispiel zeigte `client.mode: "operator"`,
+aber `GATEWAY_CLIENT_MODES` in `packages/gateway-protocol/src/client-info.ts`
+kennt diesen Wert gar nicht (gültig sind nur `webchat`/`cli`/`ui`/`backend`/
+`node`/`worker`/`probe`/`test`) - `"operator"` ist ausschließlich für das
+separate `role`-Feld gültig (eigenes Enum `{"operator","node"}`). Das
+Gateway lehnt einen unbekannten `client.id`/`client.mode`-Wert schon vor der
+Geräte-Signaturprüfung mit `INVALID_REQUEST` ab; ein Test gegen das eigene
+Mock-Gateway hätte das nie gefangen, weil der Mock denselben (falschen)
+Wert einfach unkritisch akzeptiert hätte. Vor jeder Änderung an `CLIENT_ID`/
+`CLIENT_MODE` in `gateway_client.rs` deshalb `GATEWAY_CLIENT_IDS`/
+`GATEWAY_CLIENT_MODES` im tatsächlichen OpenClaw-Quellcode gegenprüfen, nicht
+nur die Doku-Beispiele übernehmen - der Regressionstest
+`client_id_and_mode_are_in_the_gateways_closed_enums` hält den zuletzt
+geprüften Stand beider Enums fest.
+
 **Ein gültiges `gateway_token` reicht für den Gateway-WebSocket-Transport
 nicht aus.** Ohne signierte Geräteidentität setzt das Gateway angeforderte
 Scopes auf leer zurück (verifiziert im Quellcode, nicht nur in der
