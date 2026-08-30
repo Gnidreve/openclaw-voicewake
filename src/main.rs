@@ -16,12 +16,20 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use config::{Cli, Config};
 use state::{State, StateMachine};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+/// Markiert einen Schritt, der wegen eines Shutdown-Signals abgebrochen
+/// wurde - unterscheidbar von einem echten Fehler, damit dafür weder ein
+/// Fehlerton spielt noch `error!` geloggt wird (siehe `main`).
+#[derive(Debug, thiserror::Error)]
+#[error("Abbruch angefordert (Shutdown)")]
+struct ShutdownRequested;
 
 /// Wie oft der Shutdown-Flag während eines blockierenden Warteschritts
 /// (z. B. Wake-Word-Erkennung) auf ein Signal geprüft wird.
@@ -66,15 +74,23 @@ async fn main() -> Result<()> {
         }
 
         if let Err(e) = run_cycle(&cfg, &cli, &mut sm, &shutdown).await {
-            error!(error = %e, from = %sm.current(), "Fehler im Zyklus - kehre zu IDLE zurück");
+            if e.is::<ShutdownRequested>() {
+                // Kein Fehler, sondern ein angeforderter Abbruch - weder
+                // Fehlerton noch `error!`-Log dafür, die äußere Schleife
+                // beendet sich im nächsten Durchlauf ohnehin über den
+                // Shutdown-Flag.
+                info!(from = %sm.current(), "Zyklus durch Shutdown abgebrochen");
+            } else {
+                error!(error = %e, from = %sm.current(), "Fehler im Zyklus - kehre zu IDLE zurück");
 
-            // Fehlerton nur, wenn der Zyklus bereits über die Wake-Word-
-            // Erkennung hinaus war: dort wartet jemand hörbar auf eine
-            // Antwort. Ein dauerhaft fehlschlagendes Wake-Word-Kommando würde
-            // sonst im Sekundentakt Fehlertöne erzeugen.
-            if sm.current() != State::ListeningForWakeword {
-                if let Err(se) = sound::play_error_chime(&cfg.sound).await {
-                    warn!(error = %se, "Konnte Fehlerton nicht abspielen");
+                // Fehlerton nur, wenn der Zyklus bereits über die Wake-Word-
+                // Erkennung hinaus war: dort wartet jemand hörbar auf eine
+                // Antwort. Ein dauerhaft fehlschlagendes Wake-Word-Kommando
+                // würde sonst im Sekundentakt Fehlertöne erzeugen.
+                if sm.current() != State::ListeningForWakeword {
+                    if let Err(se) = sound::play_error_chime(&cfg.sound).await {
+                        warn!(error = %se, "Konnte Fehlerton nicht abspielen");
+                    }
                 }
             }
 
@@ -115,6 +131,20 @@ async fn wait_for_shutdown(shutdown: &AtomicBool) {
         if shutdown.load(Ordering::SeqCst) {
             return;
         }
+    }
+}
+
+/// Rennt `fut` gegen das Shutdown-Signal. Gewinnt das Signal, wird `fut`
+/// verworfen - bei einem noch laufenden Kindprozess (ffmpeg, whisper-cli,
+/// OpenClaw-CLI, Piper) sorgt dessen `kill_on_drop(true)` dafür, dass er
+/// dabei beendet wird, statt verwaist weiterzulaufen - und `Err`
+/// (`ShutdownRequested`) zurückgegeben, statt auf das natürliche Ende der
+/// Phase zu warten. Deckt Aufnahme, Whisper, OpenClaw und TTS ab - die
+/// Wake-Word-Wartephase hat ihren eigenen, schon bestehenden `select!`.
+async fn cancellable<T>(shutdown: &AtomicBool, fut: impl Future<Output = Result<T>>) -> Result<T> {
+    tokio::select! {
+        result = fut => result,
+        _ = wait_for_shutdown(shutdown) => Err(ShutdownRequested.into()),
     }
 }
 
@@ -211,7 +241,7 @@ async fn run_cycle_inner(
         // Wake-Word oder von der vorigen Runde ausgelöst wurde. Der einzige
         // Unterschied zwischen "erste Runde" und "Folgerunde" ist der
         // Auslöser hier drumherum, nicht ihr Ablauf.
-        if run_round(cfg, cli, sm, tmp_dir).await? == RoundOutcome::Closed {
+        if run_round(cfg, cli, sm, tmp_dir, shutdown).await? == RoundOutcome::Closed {
             sm.transition(State::Idle)?;
             return Ok(());
         }
@@ -260,6 +290,7 @@ async fn run_round(
     cli: &Cli,
     sm: &mut StateMachine,
     tmp_dir: &Path,
+    shutdown: &AtomicBool,
 ) -> Result<RoundOutcome> {
     sm.transition(State::Recording)?;
     let raw_wav = tmp_dir.join(format!("recording-{}.wav", uuid::Uuid::new_v4()));
@@ -276,17 +307,20 @@ async fn run_round(
         // die Beispieldatei nur Stille enthält.
         true
     } else {
-        record_until_silence(cfg, &raw_wav).await?
+        cancellable(shutdown, record_until_silence(cfg, &raw_wav)).await?
     };
 
     sm.transition(State::Transcribing)?;
     let transcript = if speech_detected {
         let normalized_wav = tmp_dir.join("normalized.wav");
-        transcribe::normalize_audio(
-            &cfg.general,
-            &raw_wav,
-            &normalized_wav,
-            cfg.whisper.timeout_secs,
+        cancellable(
+            shutdown,
+            transcribe::normalize_audio(
+                &cfg.general,
+                &raw_wav,
+                &normalized_wav,
+                cfg.whisper.timeout_secs,
+            ),
         )
         .await?;
         // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
@@ -295,7 +329,11 @@ async fn run_round(
             warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
         }
 
-        let t = transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir).await?;
+        let t = cancellable(
+            shutdown,
+            transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir),
+        )
+        .await?;
 
         // Normalisierte Aufnahme wird nach der Transkription nicht mehr
         // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
@@ -344,7 +382,12 @@ async fn run_round(
         warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
         String::new()
     } else {
-        match openclaw::send_to_openclaw(&cfg.openclaw, &transcript).await {
+        match cancellable(
+            shutdown,
+            openclaw::send_to_openclaw(&cfg.openclaw, &transcript),
+        )
+        .await
+        {
             Ok(r) => r,
             Err(e) => {
                 transcript_log::log_output(
@@ -377,7 +420,12 @@ async fn run_round(
     // direkt weiter aufgenommen (record_until_silence markiert Start/
     // Ende dieser Runde bereits per Ton), damit eine Folgeeingabe ohne
     // erneutes Wake-Word möglich ist.
-    if let Err(e) = tts::synthesize_and_play(&cfg.tts, &response, tmp_dir).await {
+    if let Err(e) = cancellable(
+        shutdown,
+        tts::synthesize_and_play(&cfg.tts, &response, tmp_dir),
+    )
+    .await
+    {
         transcript_log::log_output(&cfg.transcription_log, transcript_log::OutputOutcome::Error)
             .await;
         return Err(e);
@@ -532,5 +580,48 @@ mod tests {
             result.is_err(),
             "wait_for_shutdown darf nicht zurückkehren, solange der Flag nicht gesetzt ist"
         );
+    }
+
+    #[tokio::test]
+    async fn cancellable_returns_the_futures_result_when_it_finishes_first() {
+        let flag = AtomicBool::new(false);
+        let result: Result<u32> = cancellable(&flag, async { Ok(42) }).await;
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    /// Regression: Vorher wurde das Shutdown-Signal nur beim Warten auf das
+    /// Wake-Word beachtet - eine laufende Aufnahme, Whisper-Transkription,
+    /// ein OpenClaw-Aufruf oder Piper-TTS liefen ungebremst bis zu ihrem
+    /// jeweiligen `timeout_secs` weiter (im ungünstigsten Fall bis zu
+    /// `max_recording_seconds`, standardmäßig 300s).
+    #[tokio::test]
+    async fn cancellable_aborts_with_shutdown_requested_once_the_flag_is_set() {
+        let flag = AtomicBool::new(true);
+        // Ein Future, das ohne das Shutdown-Signal nie von selbst fertig
+        // würde - steht stellvertretend für eine noch laufende Aufnahme-
+        // /Whisper-/OpenClaw-/TTS-Phase.
+        let never_finishes = std::future::pending::<Result<()>>();
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            cancellable(&flag, never_finishes),
+        )
+        .await
+        .expect("cancellable sollte sofort abbrechen, wenn shutdown schon gesetzt ist");
+        let err = result.unwrap_err();
+        assert!(
+            err.is::<ShutdownRequested>(),
+            "erwarteter Fehlertyp ShutdownRequested, war aber: {err}"
+        );
+    }
+
+    /// Genau die Unterscheidung, die `main()` braucht, um bei einem
+    /// angeforderten Abbruch weder einen Fehlerton zu spielen noch `error!`
+    /// zu loggen.
+    #[test]
+    fn shutdown_requested_is_distinguishable_from_a_real_error() {
+        let shutdown_err: anyhow::Error = ShutdownRequested.into();
+        let real_err = anyhow::anyhow!("etwas ist wirklich kaputt");
+        assert!(shutdown_err.is::<ShutdownRequested>());
+        assert!(!real_err.is::<ShutdownRequested>());
     }
 }

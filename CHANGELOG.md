@@ -14,6 +14,20 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-08-30
+
+### Hinzugefügt
+
+- Shutdown (Ctrl+C/SIGTERM) unterbricht jetzt auch eine laufende Aufnahme,
+  Whisper-Transkription, den OpenClaw-Aufruf und die Piper-TTS-Wiedergabe -
+  vorher wirkte das Signal nur während der Wake-Word-Wartephase, jede
+  andere Phase lief ungebremst bis zu ihrem eigenen `timeout_secs` weiter
+  (im ungünstigsten Fall bis zu `max_recording_seconds`, standardmäßig
+  300s). Ein noch laufender Kindprozess (ffmpeg, whisper-cli, OpenClaw-CLI,
+  Piper) wird dabei über sein bestehendes `kill_on_drop(true)` beendet.
+  Ein so abgebrochener Zyklus zählt nicht als Fehler: kein Fehlerton, kein
+  `error!`-Log dafür.
+
 ## [0.1.7] - 2026-08-30
 
 ### Geändert
@@ -307,7 +321,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.4...v0.1.5
