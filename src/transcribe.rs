@@ -11,6 +11,17 @@ use crate::config::{GeneralConfig, WhisperConfig};
 /// Reine Argument-Konstruktion für ffmpeg, unabhängig testbar ohne Prozessstart.
 pub fn build_ffmpeg_args(input: &Path, output: &Path) -> Vec<String> {
     vec![
+        // Ohne dieses Flag versucht ffmpeg, das geerbte stdin (bei einer aus
+        // Terminal.app gestarteten Bridge: das echte TTY) für interaktive
+        // Tastatureingaben (q zum Beenden) zu konfigurieren (`term_init` ->
+        // `tcsetattr`). In Kombination mit `spawn_isolated`s eigener
+        // Prozessgruppe (siehe `child_process.rs`) blockiert dieser
+        // `tcsetattr`-Aufruf auf macOS für immer, statt regulär mit
+        // `SIGTTOU` gestoppt zu werden - die Normalisierung hing dadurch
+        // nach jeder Runde mit echter Sprache unbegrenzt. `-nostdin` schaltet
+        // den TTY-Zugriff von vornherein ab, unabhängig von Prozessgruppe
+        // oder geerbtem stdin.
+        "-nostdin".to_string(),
         "-y".to_string(),
         "-i".to_string(),
         input.to_string_lossy().to_string(),
@@ -170,5 +181,17 @@ mod tests {
         assert!(args.contains(&"-ar".to_string()));
         assert!(args.contains(&"16000".to_string()));
         assert_eq!(args.last(), Some(&"out.wav".to_string()));
+    }
+
+    /// Regression (0.2.4-Feldtest): Ohne `-nostdin` versucht ffmpeg, das
+    /// geerbte stdin (aus Terminal.app gestartet: ein echtes TTY) für
+    /// Tastatureingaben zu konfigurieren - das blockierte in Kombination mit
+    /// der Prozessgruppen-Isolation aus `spawn_isolated` unbegrenzt
+    /// (`tcsetattr`-Hang statt `SIGTTOU`-Stopp). Die Normalisierung hing
+    /// dadurch nach jeder Runde mit tatsächlich erkannter Sprache.
+    #[test]
+    fn ffmpeg_args_disable_stdin_to_avoid_a_terminal_ioctl_hang() {
+        let args = build_ffmpeg_args(Path::new("in.wav"), Path::new("out.wav"));
+        assert!(args.contains(&"-nostdin".to_string()));
     }
 }
