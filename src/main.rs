@@ -1,4 +1,5 @@
 mod audio;
+mod child_process;
 mod config;
 mod instance_lock;
 mod openclaw;

@@ -4,6 +4,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 
+use crate::child_process::spawn_isolated;
 use crate::config::OpenClawConfig;
 use crate::template::substitute;
 
@@ -96,7 +97,7 @@ pub async fn send_to_openclaw(cfg: &OpenClawConfig, transcript: &str) -> Result<
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let child = cmd.spawn().context("Kann OpenClaw-CLI nicht starten")?;
+    let (child, _pg_guard) = spawn_isolated(&mut cmd).context("Kann OpenClaw-CLI nicht starten")?;
     let out = timeout(
         Duration::from_secs(cfg.timeout_secs),
         child.wait_with_output(),

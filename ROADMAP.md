@@ -22,7 +22,6 @@ Läuft weiter, bis der Umstieg auf 0.2.x sauber möglich ist.
 
 | Version | Thema |
 |---|---|
-| 0.1.9 | Verwaiste Kindprozesse bei Timeout - prüfen, was über das bestehende `kill_on_drop` hinaus noch fehlt |
 | 0.1.10 | Wake-Word- und TTS-Zustände gegen Echo und Doppeltrigger absichern |
 | 0.1.11 | Verhalten bei dauerhaftem Hintergrundgeräusch verbessern, damit der Silence-Timeout wieder greift - Wurzel hinter dem Transkript-Filter (ein laufender Fernseher gilt sonst als Sprache). Ansatz noch offen: adaptiver/dynamischer Schwellwert statt fixem `silence_rms_threshold`, oder Rauschprofil-Kalibrierung zu Aufnahmebeginn - Entscheidung fällt bei der Umsetzung. |
 | 0.1.12 | OpenClaw-Session-Reset nach Inaktivität (Schwelle und Mechanismus noch offen) |

@@ -6,6 +6,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::info;
 
+use crate::child_process::spawn_isolated;
 use crate::config::TtsConfig;
 use crate::template::substitute;
 
@@ -45,7 +46,7 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = cmd.spawn().context("Kann Piper nicht starten")?;
+    let (mut child, _pg_guard) = spawn_isolated(&mut cmd).context("Kann Piper nicht starten")?;
     {
         let stdin = child
             .stdin
@@ -79,9 +80,8 @@ async fn play_wav(cfg: &TtsConfig, path: &Path) -> Result<()> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let child = cmd
-        .spawn()
-        .context("Kann Wiedergabeprogramm nicht starten")?;
+    let (child, _pg_guard) =
+        spawn_isolated(&mut cmd).context("Kann Wiedergabeprogramm nicht starten")?;
     let out = timeout(
         Duration::from_secs(cfg.timeout_secs),
         child.wait_with_output(),
