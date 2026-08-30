@@ -22,7 +22,6 @@ Läuft weiter, bis der Umstieg auf 0.2.x sauber möglich ist.
 
 | Version | Thema |
 |---|---|
-| 0.1.7 | Audioaufnahme robuster: Ringbuffer statt Allokation im Echtzeit-Callback |
 | 0.1.8 | Shutdown/Abbruch in allen Phasen (Aufnahme, Whisper, OpenClaw, TTS), nicht nur in der Wake-Word-Wartephase |
 | 0.1.9 | Verwaiste Kindprozesse bei Timeout - prüfen, was über das bestehende `kill_on_drop` hinaus noch fehlt |
 | 0.1.10 | Wake-Word- und TTS-Zustände gegen Echo und Doppeltrigger absichern |
