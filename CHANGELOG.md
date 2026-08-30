@@ -8,6 +8,10 @@ die Versionierung an [Semantic Versioning](https://semver.org/lang/de/).
 Die Version in `Cargo.toml` ist die einzige Quelle: Sie anzuheben und nach
 `main` zu mergen erzeugt Tag, Release und ZIP.
 
+Geplante, noch offene Arbeit steht in [`ROADMAP.md`](ROADMAP.md), nicht
+hier - ein Punkt landet erst in diesem Changelog, wenn er umgesetzt und
+veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
+
 ## [Unreleased]
 
 ## [0.1.5] - 2026-08-29

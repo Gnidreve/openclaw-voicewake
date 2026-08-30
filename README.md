@@ -490,9 +490,9 @@ sehen bekommt: der Start-Ton außerhalb der Aufnahme (siehe
 Sprach-Erkennung der VAD, die `min_speech_ms` **zusammenhängend** verlangt
 (`vad.speech_gap_ms`) - ohne beides öffnete sich das Gate bei jeder
 Aufnahme. Was danach noch durchkommt, ist echtes Fremdgeräusch über dem
-RMS-Schwellwert; der zugehörige offene Punkt (fixer
+RMS-Schwellwert; der zugehörige geplante Punkt (fixer
 `vad.silence_rms_threshold` vs. dynamische Raumlautstärke) steht in
-`ideas.md`.
+`ROADMAP.md`.
 
 Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
 fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur
@@ -566,6 +566,6 @@ prüft, steht in [AGENTS.md](AGENTS.md#tests).
   auf dem tatsächlichen macOS-Zielsystem `cargo build --release` und
   `cargo test` erneut ausführen sowie den `--dry-run`-Modus mit den echten
   whisper-cli/Piper/OpenClaw-Binaries durchspielen.
-- Was noch offen ist und warum, steht durchgängig in `ideas.md`; die
-  Invarianten, die dabei nicht gebrochen werden dürfen, in
+- Was konkret geplant ist, steht in `ROADMAP.md`, unkonkrete Ideen in
+  `ideas.md`; die Invarianten, die dabei nicht gebrochen werden dürfen, in
   [AGENTS.md](AGENTS.md#invarianten).

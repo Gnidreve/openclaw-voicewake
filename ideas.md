@@ -1,8 +1,12 @@
 # Ideen & offene Punkte
 
-Gesammelte Notizen aus der Diskussion zum aktuellen Stand von voicewake und
-möglichen nächsten Schritten. Kein Anspruch auf Vollständigkeit - dient als
-Ausgangspunkt für künftige Iterationen.
+Unsortierter Rohideen-Eimer: alles rein, was einem einfällt, ohne Anspruch
+auf Vollständigkeit, Reihenfolge oder Umsetzung. Sobald eine Idee hier
+konkret geplant wird (Version, Umfang), wandert sie in [`ROADMAP.md`](ROADMAP.md)
+und wird hier gelöscht - Details zu diesem Ablauf stehen in
+[`AGENTS.md`](AGENTS.md#ideen-roadmap-changelog). Bereits umgesetzte und
+veröffentlichte Punkte stehen nicht mehr hier, sondern in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Bereits außerhalb der Rust-Binary umgesetzt
 
@@ -19,225 +23,19 @@ Ausgangspunkt für künftige Iterationen.
 - Die kompilierte Rust-Binary aus dem GitHub-Artifact blieb dabei
   unverändert - alles oben ist Config/Adapter-seitig gelöst.
 
-## Empfohlene Verbesserungen direkt am Rust-Code
+## Weitere Ideen (unkonkret)
 
-1. ~~Start-Glassound **vor** dem Öffnen des Mikrofons abspielen.~~
-   **Umgesetzt - und war die eigentliche Ursache des Halluzinations-Loops,
-   nicht nur ein Qualitätsthema:** Der Ton landete beim Speakerphone (Anker
-   PowerConf S330) laut in der eigenen Aufnahme. Gut eine Sekunde über dem
-   RMS-Schwellwert genügt, um `min_speech_ms` zu überschreiten - die VAD
-   meldete deshalb bei *jeder* Aufnahme "Sprache erkannt", der Whisper-Skip
-   aus Punkt 12 konnte nie greifen, und Whisper halluzinierte aus faktischer
-   Stille Text, der als Eingabe den Kanal offen hielt. Der Ton läuft jetzt
-   vor dem Öffnen des Mikrofons, gefolgt von `audio.mic_open_delay_ms`
-   (Standard 200 ms) für das Ausklingen von Lautsprecher und Raum; der
-   Ende-Ton erst nach dem Schließen. Im `transcription.log` war das als
-   `[Input] "* Ding *"` sichtbar - der eigene Ton, von Whisper als
-   Nicht-Sprach-Ereignis transkribiert.
-
-   Zusammen damit behoben: `SilenceTracker` addierte `speech_ms` kumulativ
-   über die gesamte Aufnahme, statt zusammenhängende Sprache zu messen. Bei
-   30-ms-Frames reichten zehn verstreute laute Frames irgendwo in bis zu 60
-   Sekunden. Ein Reset nach `vad.speech_gap_ms` (Standard 200 ms)
-   zusammenhängender Stille stellt die dokumentierte Semantik "am Stück"
-   her, ohne Silbenpausen abzuschneiden. Das erklärt auch die im Feldtest
-   beobachtete Asymmetrie: `silence_ms` wurde bei jedem lauten Frame
-   zurückgesetzt, der Stille-Timeout funktionierte deshalb einwandfrei,
-   während das Sprach-Gate praktisch immer offen war.
-2. Audioaufnahme robuster machen: Ringbuffer statt Allokationen im
-   Echtzeit-Callback; stabile Behandlung von Sample-Rate und Kanalzahl.
-3. Shutdown/Abbruch in **allen** Phasen unterstützen: Wakeword, Aufnahme,
-   Whisper, OpenClaw und TTS (bisher primär für die Wakeword-Wartephase
-   gelöst).
-4. Kindprozesse sauber beenden und bei Timeouts auch verwaiste
-   OpenClaw-/ffmpeg-Prozesse aufräumen.
-5. Wakeword- und TTS-Zustände gegen Echo und Doppeltrigger absichern.
-6. Konfiguration und Adapter genauer validieren, Fehlerausgaben nicht
-   verschlucken.
-7. Streaming-Unterstützung ergänzen. Die aktuelle CLI liefert nur eine
-   fertige Antwort; echtes Streaming braucht Gateway-Events oder einen
-   Streaming-Endpunkt sowie eine Rust-Queue für Antwort-Chunks.
-8. Lokalen Unix-Socket einbauen, damit OpenClaw-Cronjobs Ereignisse senden
-   können:
-
-   ```
-   OpenClaw-Cron -> voicewake emit -> Unix-Socket -> Rust-Queue -> Piper
-   ```
-
-   Dafür wären `notify` (Direktansagen) und `ask` (agentische Ansagen)
-   sinnvolle Kommandos.
-9. Prioritäts-/Sprech-Queue einbauen, damit Warnungen vor normalen
-   Fertigmeldungen gesprochen werden und nichts parallel läuft.
-10. Erst danach als dauerhaften macOS-Hintergrunddienst bzw. echtes
-    OpenClaw-Plugin paketieren.
-11. ~~Dateien aufräumen, nachdem sie ihren Zweck erfüllt haben - nicht erst
-    pauschal am Ende des gesamten Zyklus.~~ **Umgesetzt:** Rohaufnahme wird
-    direkt nach der ffmpeg-Normalisierung gelöscht, die normalisierte
-    Aufnahme direkt nach der Transkription (jeweils vor dem OpenClaw-
-    Aufruf, unabhängig von dessen Ausgang) - Whisper- und Piper-
-    Zwischendateien waren schon vorher direkt nach Gebrauch gelöscht
-    worden. Nach einem erfolgreichen Durchlauf liegt damit keine
-    Audiodatei mehr im temporären Verzeichnis; bei einem fehlgeschlagenen
-    Zyklus räumt weiterhin die bestehende Zyklusende-Bereinigung des
-    gesamten temporären Verzeichnisses auf.
-12. ~~Leere Audioaufnahmen (Stille) nicht an den Agent weiterreichen.~~
-    **Umgesetzt (Variante "vorab prüfen"):** Reproduzierter Bug aus dem
-    Feldtest - Whisper halluziniert bei reiner Stille/Hintergrundrauschen
-    teils nicht-leeren Text, wodurch das bisherige
-    "leeres-Transkript-danach"-Kriterium nicht griff und die
-    Folgerunden-Schleife sich an sich selbst hochschaukelte. Die VAD
-    (`SilenceTracker`) weiß bereits während der Aufnahme, ob jemals
-    echte Sprache (`speech_started`) erkannt wurde; wurde nie Sprache
-    erkannt, werden ffmpeg-Normalisierung und whisper-cli jetzt komplett
-    übersprungen, statt Whisper aus Stille etwas heraushalluzinieren zu
-    lassen. Hängt weiterhin an Punkt 14 (Hintergrundgeräusch über dem
-    RMS-Schwellwert würde `speech_started` fälschlich auslösen).
-    **Nachtrag aus dem zweiten Feldtest:** Dieser Skip griff in der Praxis
-    nie, weil `speech_started` durch den mit aufgenommenen Start-Ton und
-    den kumulativen `speech_ms`-Zähler immer gesetzt war - beides in
-    Punkt 1 behoben.
-13. ~~Für Fehler braucht es einen weiteren, vom Bestätigungston (Glass)
-    unterscheidbaren Sound.~~ **Umgesetzt:** Bricht ein Zyklus nach
-    erkanntem Wake-Word ab (ffmpeg, whisper-cli, OpenClaw-Adapter, Piper),
-    wird `sound.error_chime_path` abgespielt - Default der macOS-Systemsound
-    "Basso". Fehler *während* der Wake-Word-Erkennung selbst (z. B. fehlendes
-    Listener-Binary) bleiben bewusst stumm, sonst würde der Neustart-Loop im
-    Takt von `restart_delay_ms` dauerhaft Fehlertöne erzeugen. Anlass war ein
-    `[Output] error` im Feldtest, das nur im Log sichtbar war.
-14. Bei ganz leichten Hintergrundgeräuschen wird das Schließen des
-    Audio-Channels unterbunden: Liegt die Umgebungslautstärke dauerhaft
-    knapp über `silence_rms_threshold`, erkennt die VAD nie "Stille" und
-    der Silence-Timeout greift nicht - die Aufnahme läuft bis zum viel
-    späteren `max_recording_seconds`-Limit weiter, statt nach der
-    erwarteten kurzen Stille zu enden. Muss noch überlegt werden, wie sich
-    das minimieren lässt (z. B. adaptiver/dynamischer Schwellwert statt
-    fixem `silence_rms_threshold`, oder Rauschprofil zu Beginn der
-    Aufnahme kalibrieren).
-15. ~~Zwei gleichzeitig laufende Bridge-Instanzen.~~ **Umgesetzt:** Im
-    Feldtest zeigte das Wakeword-Debug-Log pro Zyklus zwei Listener-Starts
-    mit unterschiedlichen Eltern-PIDs - es liefen also versehentlich zwei
-    Bridges parallel, die sich um Mikrofon und Listener stritten. Der Start
-    belegt jetzt eine `flock`-Sperre auf einer festen Datei im
-    Systemtemp-Verzeichnis; ein zweiter Start bricht mit Nennung der
-    laufenden PID ab. Bewusst ohne Konfigurationsschalter und unabhängig von
-    `general.temp_dir` - Parallelbetrieb ist nicht vorgesehen, und jede
-    Konfigurierbarkeit des Pfades wäre ein Weg, die Sperre auszuhebeln.
-16. ~~Fremdgeräusche (TV) halten den Folgeeingabe-Kanal offen.~~
-    **Umgesetzt, zwei Maßnahmen:** (a) `transcript_filter.ignored_patterns`
-    verwirft Transkripte mit typischen Whisper-Abspann-Halluzinationen
-    ("Untertitelung des ZDF, 2020" aus dem Feldtest) wie "keine Sprache";
-    (b) `conversation.max_followup_turns` (Default 3) begrenzt den offenen
-    Kanal hart, auch wenn jede Runde eine Antwort erzeugt. Beides bekämpft
-    die Symptome - die Ursache (VAD hält TV-Ton für Sprache) hängt weiter an
-    Punkt 14.
-17. Wake-Word-Schwellwert: Im Feldtest lagen echte Treffer bei Scores von
-    0.50-0.98, das Grundrauschen aber schon bei ~0.20 - mit `--threshold 0.1`
-    löste der Listener sofort ohne gesprochenes Wake-Word aus. 0.5 ist der
-    aktuelle Arbeitswert. Der Schwellwert lebt im Listener, nicht in der
-    Rust-Binary; in README und `config.example.toml` steht er jetzt als
-    Erfahrungswert dokumentiert. Offen: ob der Listener seine Scores
-    dauerhaft mitloggen sollte, um den Wert pro Raum/Mikrofon sauber
-    einstellen zu können.
-18. Wie und wann eine neue OpenClaw-Session gestartet wird, damit eine
-    Session nicht unendlich weiterläuft (Kontext wächst sonst
-    unbegrenzt). Grobe Idee, noch nicht final: Ist die letzte Nachricht
-    länger als eine Stunde her, wird vor dem nächsten Aufruf erst ein
-    Session-Reset (z. B. `/new` o. Ä. - genaue Umsetzung offen) gesendet.
-    Schwelle und Mechanismus müssen noch entschieden werden.
-19. ~~Der dritte Glass-Ton ("Kanal geschlossen") war nicht unterscheidbar
-    und dadurch eher verwirrend als hilfreich.~~ **Umgesetzt:** Die
-    Ton-Sprache hat jetzt genau zwei Signale mit klarer Bedeutung. Der
-    Ende-Ton hängt an `speech_started` und bestätigt damit das **Absenden**,
-    nicht bloß das Ende der Aufnahme; bleibt er aus, wurde nichts erkannt
-    und es geht nichts an OpenClaw. Der eigene "Kanal geschlossen"-Ton
-    entfällt ersatzlos - dass der Kanal zu ist, hört man daran, dass nach
-    einer Antwort kein neuer Start-Ton mehr kommt. Offen bleibt der Fall
-    "abgeschickt, aber OpenClaw liefert keine Antwort" (`[Output] skipped`):
-    aktuell tonlos, Kandidat wäre der Fehlerton.
-20. ~~Bei totaler Stille greift der Stille-Timeout nicht, weil er erkannte
-    Sprache voraussetzt - die Aufnahme lief dann bis
-    `max_recording_seconds`, also bis zu 60 Sekunden.~~ **Umgesetzt, mit
-    einer Zahl statt zweien:** Die Bedingung `speech_started &&` ist
-    gestrichen. Es gibt jetzt genau eine Uhr, die ab dem ersten Frame
-    läuft und von jedem Sprach-Frame zurückgesetzt wird; Sprechen
-    verzögert das Ende nur, statt einen zweiten Weg aufzumachen. „Niemand
-    hat gesprochen" und „jemand hat aufgehört zu sprechen" enden damit
-    über denselben Code nach derselben Zeit. `max_recording_seconds` ist
-    dadurch keine Sprachlängenbegrenzung mehr, sondern nur noch ein
-    Sicherheitsnetz gegen unbegrenztes Puffer-Wachstum bei dauerhaftem
-    Raumgeräusch (Standard 300 s, `0` = aus). Der zweite Wert für „Zeit
-    bis zum ersten Sprechen" wurde bewusst *nicht* eingeführt - eine Zahl
-    ist einfacher, und ob die 4 s als Pause nach dem Sprechen zu träge
-    sind, zeigt erst der Praxistest.
-21. ~~Erste Runde und Folgerunden sollen garantiert denselben Code
-    benutzen.~~ **Umgesetzt:** Eine Runde ist jetzt genau eine Funktion
-    (`run_round`), die Aufnahme, Transkription, OpenClaw-Aufruf und
-    Sprachausgabe kapselt und ein `RoundOutcome` zurückgibt. Wake-Word und
-    Folgerunde unterscheiden sich nur noch darin, wer sie aufruft. Damit
-    ist die Gleichheit strukturell erzwungen statt zufällig - und die
-    erste Runde taugt beim Debuggen als Referenz für alle weiteren.
-
-**Kurz gesagt:** Die Basis funktioniert. Der nächste echte Rust-Schritt ist
-nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
-Streaming.
-
-
-## Untersuchung: OpenClaw-Gateway-WebSocket für echtes Streaming-Verhalten
-
-Frage: Lässt sich das aus Telegram bekannte Verhalten (Eingang der
-Voice-Message, laufende Agent-Session, separate Zwischen-/Antwort-Dispatches)
-auch für voicewake erreichen?
-
-Ergebnis der Prüfung von lokaler Gateway-Doku und installierter
-Implementierung: **Ja, der Weg existiert.**
-
-Relevanter WebSocket-Pfad:
-
-1. Verbindung zu `ws://127.0.0.1:18789` (Gateway läuft lokal auf Loopback).
-2. `connect`-Handshake als lokaler Operator mit passenden Scopes.
-3. `sessions.messages.subscribe` für `agent:main:voice-assistant`.
-4. `chat.send` statt `openclaw agent --json`.
-5. Sofortiges ACK mit `runId` und `status: started`.
-6. Danach laufende Gateway-Events:
-   - `chat` mit `deltaText` und später `final`
-   - `session.message`
-   - `session.operation`
-   - `session.tool` (laufender Tool-/Arbeitsfortschritt)
-
-Laut Doku ist `chat.send` non-blocking; die Antwort streamt über
-`chat`-Events - das entspricht dem aus Telegram bekannten Verhalten.
-
-**Wichtig:** Bei dieser Untersuchung wurden nur die vorhandenen
-Schnittstellen gesichtet, nichts am Gateway geändert oder neu gestartet.
-
-### Möglicher erster Schritt (ohne Rust-Neubuild)
-
-Der OpenClaw-Adapter könnte per WebSocket `chat.send` starten, beim ACK
-sofort "Ich schaue mir das an" an Piper geben, und danach Delta-/
-Fortschritts-Events zu sprechbaren Abschnitten sammeln. Die finale Antwort
-würde weiterhin wie bisher an Rust übergeben.
-
-Für sauberes Queueing, Cron-Events und parallele Ansagen bleibt eine
-spätere Rust-Integration (siehe Punkte 7-9 oben) trotzdem sinnvoller als ein
-reiner Adapter-Workaround.
-
-### Nächster sinnvoller Schritt
-
-Ein kleiner **read-only Streaming-Prototyp** im Adapter, der die
-WebSocket-Events zunächst nur protokolliert (`chat`, `session.message`,
-`session.operation`, `session.tool`) - bevor Audio/Piper daran gehängt wird.
-
-## Paketierung: Hintergrunddienst mit Menüleisten-Icon (wie Tailscale)
-
-Ergänzung zu Punkt 10 oben ("als dauerhaften macOS-Hintergrunddienst
-paketieren") - konkrete Anforderungen an das spätere Packaging:
-
-- Muss ein **vollständiger Hintergrundtask** sein: läuft ohne offenes
-  Fenster, kein Dock-Icon/Vordergrund-App-Zwang.
-- Ein Fenster (Status/Konfiguration) soll sich bei Bedarf öffnen lassen -
-  **Schließen des Fensters darf den Task aber nicht beenden**. Fenster
-  und Hintergrunddienst sind entkoppelt.
-- Lebt dauerhaft als **Menüleisten-Icon** (macOS-Pendant zur rechten
-  Windows-Taskleiste), vergleichbar mit der Tailscale-Menüleisten-App.
-- Über das Menüleisten-Icon: **An/Aus-Toggle** zum kompletten
-  Aktivieren/Deaktivieren des Dienstes.
+- Wake-Word-Schwellwert: Im Feldtest lagen echte Treffer bei Scores von
+  0.50-0.98, das Grundrauschen aber schon bei ~0.20 - mit `--threshold 0.1`
+  löste der Listener sofort ohne gesprochenes Wake-Word aus. 0.5 ist der
+  aktuelle Arbeitswert, in README und `config.example.toml` als
+  Erfahrungswert dokumentiert. Der Schwellwert lebt im Listener, nicht in
+  der Rust-Binary. Offen: ob der Listener seine Scores dauerhaft mitloggen
+  sollte, um den Wert pro Raum/Mikrofon sauber einstellen zu können.
+- Whisper-eigenes VAD (`--vad` mit Silero) würde Halluzinationen aus
+  Nicht-Sprache an der Quelle abstellen, nicht nur nachträglich über den
+  Transkript-Filter; über `whisper.extra_args` ohne Rust-Änderung testbar.
+- Wake-Word-Listener nativ in Rust statt als externer Prozess: Der
+  Neustart pro Zyklus war die Quelle mehrerer Feldtest-Fehler. In Rust wäre
+  es ein einziger Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die
+  Nachbildung der openWakeWord-Vorverarbeitung.

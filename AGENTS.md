@@ -182,24 +182,23 @@ mergen erzeugt Tag, Release und ZIP; Details im
 [Release-Abschnitt der README](README.md#release). Ein Tag, der nicht zu
 `Cargo.toml` passt, bricht den Workflow ab.
 
-## Offene Punkte
+## Ideen, Roadmap, Changelog
 
-`ideas.md` ist die gepflegte Liste - erledigte Punkte sind durchgestrichen
-und mit dem Ergebnis versehen, offene stehen im Klartext da. Die derzeit
-wichtigsten:
+Drei Dateien, ein Punkt gehört immer nur in genau eine davon:
 
-* **Adaptiver RMS-Schwellwert** (Punkt 14): `silence_rms_threshold` ist
-  fix. Liegt die Raumlautstärke dauerhaft darüber - laufender Fernseher -,
-  gilt Geräusch als Sprache. Das ist die Wurzel hinter dem Transkript-Filter.
-* **Whisper-eigenes VAD**: `--vad` mit Silero würde Halluzinationen aus
-  Nicht-Sprache an der Quelle abstellen; über `whisper.extra_args` ohne
-  Rust-Änderung testbar.
-* **`[Output] skipped` ist tonlos** - abgeschickt, aber keine Antwort
-  erhalten, bleibt akustisch unbemerkt.
-* **Wake-Word-Listener als externer Prozess**: Der Neustart pro Zyklus war
-  die Quelle mehrerer Fehler. In Rust wäre es ein einziger
-  Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die Nachbildung der
-  openWakeWord-Vorverarbeitung.
+* **`ideas.md`** - unsortierter Rohideen-Eimer. Alles rein, ohne Anspruch
+  auf Umsetzung oder Reihenfolge.
+* **`ROADMAP.md`** - nur konkret geplante, noch offene Punkte, je einer
+  künftigen Version zugeordnet. Aufgebaut wie ein Stack: oben steht, was
+  als Nächstes drankommt, neue Punkte werden unten angehängt.
+* **`CHANGELOG.md`** - nur bereits veröffentlichte Punkte.
+
+Wird eine Idee konkret geplant, wandert sie aus `ideas.md` in `ROADMAP.md`
+und wird dort gelöscht. Wird ein Roadmap-Punkt veröffentlicht, wandert er
+aus `ROADMAP.md` ins `CHANGELOG.md` und wird dort gelöscht. Keine Dopplung
+zwischen den drei Dateien: Für den aktuellen Stand der geplanten Arbeit
+gilt `ROADMAP.md`, für unkonkrete Ideen `ideas.md` - nicht diese Datei
+hier, die nur die Spielregel dafür festhält.
 
 ## Was dieses Projekt nicht tut
 
