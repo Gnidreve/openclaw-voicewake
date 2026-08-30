@@ -39,3 +39,9 @@ veröffentlichte Punkte stehen nicht mehr hier, sondern in
   Neustart pro Zyklus war die Quelle mehrerer Feldtest-Fehler. In Rust wäre
   es ein einziger Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die
   Nachbildung der openWakeWord-Vorverarbeitung.
+
+## Piper Transkription über die vom Gateway Verfügbaren Mechanismus transkripieren lassen anstatt direkt über das binary. nur per websocket verfügbar. Dies ist ein imolementierter Mechanismus den der telegram channel schon erfolgreich utilized. (siehe Gateway-Transcription.md)
+
+
+## Android Applikation für remote Verbindungen vom Handy
+- Eigene Release Datei für Android getrennt vom eigentlichen macos release. Durch die implementierung der websocket verbindung sollte jede version und jedes zielsystem im modus websocket 
