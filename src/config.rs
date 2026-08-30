@@ -440,6 +440,44 @@ impl Config {
                 self.whisper.model_path.display()
             );
         }
+
+        // Ein leeres Muster passt per `str::contains` auf JEDE Zeile - die
+        // Wake-Word-Erkennung würde dann beim ersten Prozess-Output sofort
+        // auslösen, egal was ausgegeben wurde. Kein Absturz, aber eine
+        // wirkungslose Wake-Word-Gate ohne jede Fehlermeldung.
+        if self.wakeword.trigger_pattern.is_empty() {
+            anyhow::bail!(
+                "wakeword.trigger_pattern ist leer - das würde auf jede Ausgabezeile passen \
+                 und die Wake-Word-Erkennung sofort auslösen, egal was ausgegeben wird."
+            );
+        }
+
+        // `record_until_silence` rechnet `frame_ms` in die Frame-Größe um und
+        // zählt bei jedem Frame `frame_ms` zu `elapsed_ms`/`silence_ms` dazu
+        // (siehe `SilenceTracker::push_frame`). Bei 0 bliebe `elapsed_ms` für
+        // immer bei 0 - weder `silence_timeout_ms` noch
+        // `max_recording_seconds` könnten dann je ablaufen, die Aufnahme
+        // liefe unbegrenzt weiter.
+        if self.vad.frame_ms == 0 {
+            anyhow::bail!(
+                "vad.frame_ms ist 0 - silence_timeout_ms und max_recording_seconds könnten \
+                 dann nie ablaufen, die Aufnahme liefe unbegrenzt weiter."
+            );
+        }
+
+        // Der Reset-Mechanismus schickt `session_reset_message` unverändert
+        // als eigenständige Nachricht (siehe `openclaw::send_raw_to_openclaw`)
+        // - eine leere Nachricht wäre ein Aufruf ohne erkennbaren Zweck.
+        if self.openclaw.session_reset_after_secs > 0
+            && self.openclaw.session_reset_message.trim().is_empty()
+        {
+            anyhow::bail!(
+                "openclaw.session_reset_message ist leer, obwohl \
+                 session_reset_after_secs > 0 gesetzt ist - ohne Text hätte der \
+                 Session-Reset keine erkennbare Wirkung."
+            );
+        }
+
         Ok(())
     }
 }
@@ -605,6 +643,54 @@ mod tests {
     fn validate_accepts_configured_channel_in_dry_run() {
         let mut cfg = Config::default();
         cfg.openclaw.target_channel = "voice-assistant".to_string();
+        assert!(cfg.validate(true).is_ok());
+    }
+
+    /// Regression: Ein leeres `trigger_pattern` passt per `str::contains`
+    /// auf jede Ausgabezeile - die Wake-Word-Erkennung würde dann beim
+    /// ersten Prozess-Output sofort und unbemerkt auslösen.
+    #[test]
+    fn validate_rejects_empty_trigger_pattern() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.wakeword.trigger_pattern = String::new();
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("trigger_pattern"), "{err}");
+    }
+
+    /// Regression: `frame_ms = 0` ließe `elapsed_ms` in
+    /// `SilenceTracker::push_frame` für immer bei 0 stehen - weder
+    /// `silence_timeout_ms` noch `max_recording_seconds` könnten dann je
+    /// ablaufen.
+    #[test]
+    fn validate_rejects_zero_frame_ms() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.vad.frame_ms = 0;
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("frame_ms"), "{err}");
+    }
+
+    /// Regression: Eine leere `session_reset_message` bei aktiviertem Reset
+    /// (`session_reset_after_secs > 0`) hätte keine erkennbare Wirkung.
+    #[test]
+    fn validate_rejects_empty_session_reset_message_when_reset_is_enabled() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.session_reset_after_secs = 3600;
+        cfg.openclaw.session_reset_message = "  ".to_string();
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("session_reset_message"), "{err}");
+    }
+
+    /// Eine leere `session_reset_message` ist unschädlich, solange der Reset
+    /// über `session_reset_after_secs = 0` ohnehin abgeschaltet ist.
+    #[test]
+    fn validate_accepts_empty_session_reset_message_when_reset_is_disabled() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.session_reset_after_secs = 0;
+        cfg.openclaw.session_reset_message = String::new();
         assert!(cfg.validate(true).is_ok());
     }
 

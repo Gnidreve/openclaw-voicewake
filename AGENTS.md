@@ -71,6 +71,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `state.rs` | erlaubte Zustandsübergänge |
 | `audio.rs` | CoreAudio-Aufnahme, WAV schreiben |
 | `vad.rs` | Stille-/Sprach-Erkennung (reine Logik, gut testbar) |
+| `wakeword.rs` | Wake-Word-Prozess starten, auf Trigger-Zeile warten |
 | `transcribe.rs` | ffmpeg-Normalisierung, whisper-cli |
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
@@ -170,6 +171,17 @@ gesendetem Transkript, unterschieden von `[Output] skipped` ohne
 Sendeversuch über `sent_to_openclaw` in `run_round`). Keine weiteren,
 gleich klingenden Töne hinzufügen - das Ausbleiben eines Tons ist selbst
 ein Signal.
+
+**Jeder Kindprozess gibt seine stderr-Ausgabe bei einem Fehlschlag preis.**
+`transcribe.rs`, `openclaw.rs`, `tts.rs`, `sound.rs` fangen stderr per
+`Stdio::piped()` und hängen sie in die Fehlermeldung ein. Ein Adapter, der
+stattdessen `Stdio::null()` setzt (wie früher `wakeword.rs`), verwirft die
+einzige konkrete Fehlerursache (fehlendes Modell, Traceback, Gerät belegt)
+- übrig bleibt nur eine generische "unerwartet beendet"-Meldung ohne
+Diagnosewert. Läuft der Prozess wie in `wakeword.rs` per Zeilen-Stream
+statt `wait_with_output()`, muss stderr **parallel** zum stdout-Lesen
+abgegriffen werden (eigener Task), sonst blockiert ein vollgelaufener
+stderr-Puffer den Prozess.
 
 **Steuernachrichten an OpenClaw (z. B. der Session-Reset) laufen NICHT
 durch `message_template`.** Der Umschlag ist für Transkript-Formregeln

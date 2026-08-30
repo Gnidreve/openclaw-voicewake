@@ -18,11 +18,8 @@ feststeht.
 
 ## 0.1.x - Laufende Härtung (aktuelle CLI-RPC-Architektur)
 
-Läuft weiter, bis der Umstieg auf 0.2.x sauber möglich ist.
-
-| Version | Thema |
-|---|---|
-| 0.1.14 | Verbleibende Lücken in Config-/Adapter-Validierung schließen, Fehlerausgaben nicht verschlucken |
+Aktuell keine offenen Punkte - neue Härtungsarbeit landet bei Bedarf
+weiterhin hier, solange die aktuelle CLI-RPC-Architektur (vor 0.2.x) läuft.
 
 ## 0.2.x - WebSocket-Streaming, CLI bleibt als Legacy-Pfad
 
