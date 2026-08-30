@@ -12,7 +12,14 @@ pub enum VadDecision {
 /// Aufnahme fortgesetzt oder beendet werden soll.
 #[derive(Debug)]
 pub struct SilenceTracker {
-    threshold: f32,
+    min_threshold: f32,
+    noise_floor_margin: f32,
+    noise_floor_rise_alpha: f32,
+    noise_floor_fall_alpha: f32,
+    /// Laufende Schätzung der Umgebungslautstärke, aus jedem Frame
+    /// nachgeführt (asymmetrisch, siehe `update_noise_floor`) - unabhängig
+    /// davon, ob der Frame als Sprache oder Stille eingestuft wurde.
+    noise_floor: f32,
     silence_timeout_ms: u64,
     max_recording_ms: u64,
     min_speech_ms: u64,
@@ -26,7 +33,11 @@ pub struct SilenceTracker {
 impl SilenceTracker {
     pub fn new(cfg: &VadConfig) -> Self {
         Self {
-            threshold: cfg.silence_rms_threshold,
+            min_threshold: cfg.silence_rms_threshold,
+            noise_floor_margin: cfg.noise_floor_margin,
+            noise_floor_rise_alpha: cfg.noise_floor_rise_alpha,
+            noise_floor_fall_alpha: cfg.noise_floor_fall_alpha,
+            noise_floor: 0.0,
             silence_timeout_ms: cfg.silence_timeout_ms,
             max_recording_ms: cfg.max_recording_seconds * 1000,
             min_speech_ms: cfg.min_speech_ms,
@@ -38,10 +49,42 @@ impl SilenceTracker {
         }
     }
 
+    /// Schwelle für "das ist Sprache" - der höhere Wert aus der fixen
+    /// Untergrenze und dem nachgeführten Rauschboden plus Marge. Bei
+    /// dauerhaft erhöhter Umgebungslautstärke (laufender Fernseher) steigt
+    /// sie mit dem Rauschboden mit, statt dass die Umgebung selbst dauerhaft
+    /// als Sprache gilt.
+    fn effective_threshold(&self) -> f32 {
+        self.min_threshold
+            .max(self.noise_floor + self.noise_floor_margin)
+    }
+
+    /// Führt den Rauschboden mit `rms` nach - unabhängig von der
+    /// Sprache/Stille-Einstufung des Frames. Absichtlich *nicht* an die
+    /// Einstufung gekoppelt: Läge die Umgebungslautstärke schon zu Beginn
+    /// über der Anfangsschwelle, würde ein Update nur bei "Stille"
+    /// eingestuften Frames nie stattfinden - die Schwelle könnte dann nie
+    /// nachziehen. Stattdessen sorgt eine asymmetrische Rate dafür, dass
+    /// kurze, lautere Abschnitte (Sprache) den Boden nur langsam anheben,
+    /// während er nach unten schnell wieder dem tatsächlichen Pegel folgt.
+    fn update_noise_floor(&mut self, rms: f32) {
+        let alpha = if rms > self.noise_floor {
+            self.noise_floor_rise_alpha
+        } else {
+            self.noise_floor_fall_alpha
+        };
+        self.noise_floor = alpha * rms + (1.0 - alpha) * self.noise_floor;
+    }
+
     pub fn push_frame(&mut self, rms: f32, frame_ms: u64) -> VadDecision {
         self.elapsed_ms += frame_ms;
+        // Schwelle aus dem bisherigen Rauschboden bilden, bevor dieser
+        // Frame ihn selbst beeinflusst - sonst würde ein Frame seine eigene
+        // Einstufung mitbestimmen.
+        let threshold = self.effective_threshold();
+        self.update_noise_floor(rms);
 
-        if rms >= self.threshold {
+        if rms >= threshold {
             self.silence_ms = 0;
             self.speech_ms += frame_ms;
             if self.speech_ms >= self.min_speech_ms {
@@ -81,9 +124,10 @@ impl SilenceTracker {
         VadDecision::Continue
     }
 
-    /// Ob während der Aufnahme jemals RMS-Energie über `silence_rms_threshold`
-    /// für mindestens `min_speech_ms` am Stück lag (Pausen bis
-    /// `speech_gap_ms` unterbrechen den Lauf nicht). `false` bedeutet: die
+    /// Ob während der Aufnahme jemals RMS-Energie über der jeweils
+    /// aktuellen Schwelle (siehe `effective_threshold`) für mindestens
+    /// `min_speech_ms` am Stück lag (Pausen bis `speech_gap_ms`
+    /// unterbrechen den Lauf nicht). `false` bedeutet: die
     /// gesamte Aufnahme war (aus VAD-Sicht) Stille/Hintergrundrauschen -
     /// unabhängig davon, was Whisper aus dem Audio heraushalluzinieren würde,
     /// sollte es trotzdem transkribiert werden.
@@ -112,6 +156,9 @@ mod tests {
             silence_timeout_ms: 4000,
             max_recording_seconds: 60,
             silence_rms_threshold: 0.02,
+            noise_floor_margin: 0.02,
+            noise_floor_rise_alpha: 0.003,
+            noise_floor_fall_alpha: 0.1,
             min_speech_ms: 300,
             speech_gap_ms: 200,
             frame_ms: 30,
@@ -341,5 +388,100 @@ mod tests {
         let loud = vec![0.5f32; 100];
         assert!(rms(&silent) < rms(&loud));
         assert_eq!(rms(&[]), 0.0);
+    }
+
+    /// Regression für den eigentlichen Feldtest-Bug: liegt die
+    /// Umgebungslautstärke (laufender Fernseher) dauerhaft über dem fixen
+    /// `silence_rms_threshold`, erkennt die VAD nie "Stille" und die
+    /// Aufnahme lief bis `max_recording_seconds` weiter. Nach genug Frames
+    /// mit demselben Pegel muss der nachgeführte Rauschboden die Schwelle
+    /// so weit angehoben haben, dass genau dieser Pegel als Stille zählt
+    /// und der reguläre Stille-Timeout greift.
+    #[test]
+    fn sustained_noise_above_the_fixed_threshold_eventually_counts_as_silence() {
+        const TV_NOISE: f32 = 0.03; // über dem fixen silence_rms_threshold (0.02)
+        let mut c = cfg();
+        c.noise_floor_rise_alpha = 0.05; // schneller adaptieren, für einen kompakten Test
+        let mut t = SilenceTracker::new(&c);
+
+        // Genug Frames füttern, bis der Rauschboden nachgezogen hat und
+        // TV_NOISE nicht mehr über der Schwelle liegt.
+        let mut last = VadDecision::Continue;
+        for _ in 0..300 {
+            last = t.push_frame(TV_NOISE, 30);
+            if last != VadDecision::Continue {
+                break;
+            }
+        }
+
+        assert_eq!(
+            last,
+            VadDecision::StopSilence,
+            "TV-Rauschen sollte nach der Anpassung als Stille enden, nicht als max_recording_seconds erreichen"
+        );
+    }
+
+    /// Ohne die Anfangsschwelle als Untergrenze (`silence_rms_threshold`)
+    /// könnte der Rauschboden in einem sehr leisen Raum gegen 0 fallen und
+    /// dadurch minimales Mikrofon-Grundrauschen schon als Sprache zählen.
+    #[test]
+    fn effective_threshold_never_drops_below_the_fixed_minimum() {
+        let mut c = cfg();
+        c.silence_rms_threshold = 0.02;
+        c.noise_floor_margin = 0.005;
+        let mut t = SilenceTracker::new(&c);
+        for _ in 0..500 {
+            t.push_frame(0.0, 30);
+        }
+        assert!(
+            t.effective_threshold() >= 0.02,
+            "Schwelle darf die fixe Untergrenze nie unterschreiten, war {}",
+            t.effective_threshold()
+        );
+    }
+
+    /// Eine normal lange Äußerung darf den Rauschboden nicht so weit
+    /// anheben, dass sie sich selbst gegen Ende als Stille einstuft - die
+    /// Anhebung pro Sekunde muss klein gegenüber einer typischen
+    /// Sprechdauer sein.
+    #[test]
+    fn a_realistic_utterance_does_not_get_swallowed_by_its_own_noise_floor_rise() {
+        let mut t = SilenceTracker::new(&cfg());
+        // 3 Sekunden zusammenhängende Sprache bei einem für Sprache
+        // typischen Pegel, deutlich über der Schwelle.
+        for _ in 0..100 {
+            assert_eq!(
+                t.push_frame(0.2, 30),
+                VadDecision::Continue,
+                "eine normale, wenige Sekunden lange Äußerung darf nicht vorzeitig als Stille gelten"
+            );
+        }
+        assert!(t.speech_started());
+    }
+
+    /// Nach einem lauten Abschnitt (der den Boden minimal anhebt) muss
+    /// dieser dank der schnellen Fall-Rate zügig wieder auf den echten,
+    /// leisen Pegel zurückfallen - kein dauerhaft erhöhter Boden nach
+    /// Sprachende.
+    #[test]
+    fn noise_floor_recovers_quickly_after_a_loud_section_ends() {
+        let mut t = SilenceTracker::new(&cfg());
+        for _ in 0..50 {
+            t.push_frame(LOUD, 30);
+        }
+        let floor_after_speech = t.effective_threshold();
+
+        for _ in 0..50 {
+            t.push_frame(QUIET, 30);
+        }
+        assert!(
+            t.effective_threshold() < floor_after_speech,
+            "Schwelle sollte nach Stille wieder Richtung Minimum gefallen sein"
+        );
+        assert!(
+            (t.effective_threshold() - 0.02).abs() < 0.001,
+            "Schwelle sollte nahe an die fixe Untergrenze zurückgefallen sein, war {}",
+            t.effective_threshold()
+        );
     }
 }

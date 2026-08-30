@@ -484,15 +484,17 @@ also auch bei `Untertitelung des ZDF, 2020`. Eine leere Liste schaltet den
 Filter ab.
 
 Das ist bewusst nur das letzte Netz, nicht die tragende Schicht. Davor
-liegen zwei Stufen, die verhindern sollen, dass Whisper überhaupt Stille zu
+liegen drei Stufen, die verhindern sollen, dass Whisper überhaupt Stille zu
 sehen bekommt: der Start-Ton außerhalb der Aufnahme (siehe
-[oben](#warum-der-start-ton-vor-dem-mikrofon-kommt)) und die
+[oben](#warum-der-start-ton-vor-dem-mikrofon-kommt)), die
 Sprach-Erkennung der VAD, die `min_speech_ms` **zusammenhängend** verlangt
-(`vad.speech_gap_ms`) - ohne beides öffnete sich das Gate bei jeder
-Aufnahme. Was danach noch durchkommt, ist echtes Fremdgeräusch über dem
-RMS-Schwellwert; der zugehörige geplante Punkt (fixer
-`vad.silence_rms_threshold` vs. dynamische Raumlautstärke) steht in
-`ROADMAP.md`.
+(`vad.speech_gap_ms`), und der an die tatsächliche Umgebungslautstärke
+angepasste Rauschboden (`vad.noise_floor_margin`,
+`vad.noise_floor_rise_alpha`, `vad.noise_floor_fall_alpha`) - ohne all das
+öffnete sich das Gate bei jeder Aufnahme bzw. bei dauerhaftem
+Hintergrundgeräusch (laufender Fernseher) dauerhaft. Was danach noch
+durchkommt, sind echte, aber unerwünschte Äußerungen über der
+Erkennungsschwelle.
 
 Mit `transcription_log.enabled = false` lässt sich das Log abschalten. Ein
 fehlgeschlagenes Schreiben (z. B. Pfad nicht beschreibbar) wird nur

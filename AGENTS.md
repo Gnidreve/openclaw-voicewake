@@ -120,6 +120,15 @@ oder Shutdown-Abbruch verwaist weiter. Der `ProcessGroupGuard` killt beim
 Drop die ganze Gruppe - nach regulärem Prozessende ein wirkungsloser
 No-Op.
 
+**Der Rauschboden wird bei jedem Frame nachgeführt, nie nur bei "Stille".**
+Läge die Umgebungslautstärke schon zu Beginn über der Anfangsschwelle,
+würde ein Update ausschließlich bei "Stille" eingestuften Frames nie
+stattfinden - die Schwelle könnte dann nie nachziehen (Deadlock). Die
+asymmetrische Rate (`noise_floor_rise_alpha` klein, `noise_floor_fall_alpha`
+groß) verhindert stattdessen, dass eine normale Äußerung den Boden selbst
+anhebt, während dauerhaftes Geräusch (Fernseher) über viele Sekunden zur
+neuen Basis wird.
+
 **Wake-Word-Lauschen und TTS-Wiedergabe hängen an `require()`, nicht nur
 an der Aufrufreihenfolge.** `sm.require(State::ListeningForWakeword)` bzw.
 `sm.require(State::Speaking)` direkt vor dem jeweiligen Aufruf. Ohne diese

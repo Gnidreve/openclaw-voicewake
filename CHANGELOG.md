@@ -14,6 +14,25 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-08-30
+
+### Hinzugefügt
+
+- Adaptiver Rauschboden für die Sprach-Erkennungsschwelle
+  (`vad.noise_floor_margin`, `vad.noise_floor_rise_alpha`,
+  `vad.noise_floor_fall_alpha`): Liegt die Umgebungslautstärke dauerhaft
+  über `vad.silence_rms_threshold` (laufender Fernseher), passt sich die
+  Schwelle über einige Sekunden an den tatsächlichen Pegel an, statt dass
+  dieser permanent als Sprache gilt und der Stille-Timeout nie greift.
+  `silence_rms_threshold` bleibt als feste Untergrenze erhalten. Die
+  Anpassung ist bewusst asymmetrisch (langsam hoch, schnell runter), damit
+  eine normale Äußerung den Boden nicht selbst anhebt.
+
+### Geändert
+
+- `silence_rms_threshold` ist jetzt eine Untergrenze, kein fixer
+  Schwellwert mehr - bestehende Werte funktionieren unverändert weiter.
+
 ## [0.1.10] - 2026-08-30
 
 ### Hinzugefügt
@@ -344,7 +363,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.1.7...v0.1.8
