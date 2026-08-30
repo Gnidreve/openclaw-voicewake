@@ -63,14 +63,29 @@ ignored_patterns = [
 # die man zum Anfangen hat, als auch die Pause, die eine Äußerung beenden
 # darf.
 silence_timeout_ms = 4000
-# Sicherheitsnetz, KEINE Längenbegrenzung für Sprache: Liegt die Umgebung
-# dauerhaft über silence_rms_threshold (laufender Fernseher o. Ä.), läuft
-# die Stille-Uhr nie ab und der Aufnahmepuffer würde unbegrenzt wachsen.
-# Deshalb bewusst weit über jeder realistischen Äußerung. 0 = ganz aus.
+# Sicherheitsnetz, KEINE Längenbegrenzung für Sprache: Läuft die Stille-Uhr
+# trotz Rauschboden-Anpassung (siehe unten) nie ab, würde der
+# Aufnahmepuffer sonst unbegrenzt wachsen. Deshalb bewusst weit über jeder
+# realistischen Äußerung. 0 = ganz aus.
 max_recording_seconds = 300
-# RMS-Schwellwert (0.0-1.0) für "Sprache erkannt". Ggf. je nach Mikrofon/
-# Raum anpassen.
+# Untere Grenze für die Sprach-Erkennungsschwelle (0.0-1.0) - wird nie
+# unterschritten, auch wenn der nachgeführte Rauschboden niedriger läge.
+# Ggf. je nach Mikrofon/Raum anpassen.
 silence_rms_threshold = 0.02
+# Zusätzlicher Abstand oberhalb des laufend nachgeführten Rauschbodens, den
+# ein Frame überschreiten muss, um als Sprache zu gelten. Passt sich damit
+# an dauerhaftes Hintergrundgeräusch (laufender Fernseher) an, statt dass
+# dieses permanent als Sprache gilt.
+noise_floor_margin = 0.02
+# Wie schnell der Rauschboden nach OBEN nachgeführt wird (0.0-1.0), wenn
+# ein Frame lauter als der aktuelle Boden ist. Bewusst klein: Eine normale,
+# wenige Sekunden lange Äußerung soll den Boden nicht selbst spürbar
+# anheben, nur dauerhaftes Geräusch über viele Sekunden hinweg.
+noise_floor_rise_alpha = 0.003
+# Wie schnell der Rauschboden nach UNTEN nachgeführt wird (0.0-1.0), wenn
+# ein Frame leiser als der aktuelle Boden ist. Bewusst groß: Wird die
+# Umgebung leiser, soll der Boden zügig auf den echten Pegel zurückfallen.
+noise_floor_fall_alpha = 0.1
 # Mindestdauer erkannter Sprache, bevor Stille danach zum Stopp führen darf
 # (verhindert, dass ein kurzes Klick-Geräusch die Aufnahme sofort beendet).
 # Gilt zusammenhängend, siehe speech_gap_ms.

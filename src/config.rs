@@ -59,7 +59,31 @@ pub struct VadConfig {
     /// Stille-Uhr deshalb nie abläuft. Bewusst hoch angesetzt: Es ist keine
     /// Längenbegrenzung für Sprache. `0` schaltet es ab.
     pub max_recording_seconds: u64,
+    /// Untere Grenze für die Sprach-Erkennungsschwelle - wird nie
+    /// unterschritten, auch wenn der nachgeführte Rauschboden (siehe
+    /// `noise_floor_margin`) niedriger läge. Verhindert Übersensibilität in
+    /// einem sehr leisen Raum (Mikrofon-Grundrauschen).
     pub silence_rms_threshold: f32,
+    /// Zusätzlicher Abstand oberhalb des laufend nachgeführten
+    /// Rauschbodens, den ein Frame überschreiten muss, um als Sprache zu
+    /// gelten. Der Rauschboden folgt der tatsächlichen Umgebungslautstärke
+    /// (z. B. ein laufender Fernseher) - dadurch bleibt die Sprach-Schwelle
+    /// auch bei dauerhaftem Hintergrundgeräusch über dem Umgebungspegel,
+    /// statt dass dieser permanent als Sprache gilt (siehe
+    /// `transcript_filter` als nachgelagertes zweites Netz).
+    pub noise_floor_margin: f32,
+    /// Glättungsfaktor (0.0-1.0), mit dem der Rauschboden nach OBEN
+    /// nachgeführt wird, wenn ein Frame lauter als der aktuelle Boden ist.
+    /// Bewusst klein/langsam: Ein einzelner Sprechabschnitt (typisch wenige
+    /// Sekunden) soll den Boden nicht selbst signifikant anheben, nur
+    /// dauerhaftes Hintergrundgeräusch über viele Sekunden hinweg.
+    pub noise_floor_rise_alpha: f32,
+    /// Glättungsfaktor (0.0-1.0), mit dem der Rauschboden nach UNTEN
+    /// nachgeführt wird, wenn ein Frame leiser als der aktuelle Boden ist.
+    /// Bewusst groß/schnell: Sobald die Umgebung leiser wird (z. B. nach
+    /// einem Sprechabschnitt), soll der Boden zügig wieder auf den echten
+    /// Pegel zurückfallen, statt lange nachzuhängen.
+    pub noise_floor_fall_alpha: f32,
     pub min_speech_ms: u64,
     /// Zusammenhängende Stille, nach der ein laufender Sprach-Abschnitt als
     /// beendet gilt und `min_speech_ms` wieder von vorn zählt. Verhindert,
@@ -75,6 +99,15 @@ impl Default for VadConfig {
             silence_timeout_ms: 4000,
             max_recording_seconds: 300,
             silence_rms_threshold: 0.02,
+            noise_floor_margin: 0.02,
+            // ~30s bis zu ~95% Anpassung an einen neuen, dauerhaft
+            // lauteren Pegel - deutlich langsamer als eine typische
+            // Äußerung (wenige Sekunden), aber weit innerhalb von
+            // `max_recording_seconds`.
+            noise_floor_rise_alpha: 0.003,
+            // ~1s bis zu ~95% Erholung, sobald die Umgebung wieder leiser
+            // wird.
+            noise_floor_fall_alpha: 0.1,
             min_speech_ms: 300,
             speech_gap_ms: 200,
             frame_ms: 30,
