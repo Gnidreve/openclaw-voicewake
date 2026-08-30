@@ -1,0 +1,46 @@
+name: Test
+
+# Läuft eigenständig auf jeden Pull Request nach main (schnelles Feedback auf
+# einem günstigen Ubuntu-Runner) und wird zusätzlich von build-macos.yml als
+# `uses:`-Job eingebunden, damit der eigentliche macOS-Build technisch von
+# `needs:` an dieses Ergebnis gebunden ist - nicht nur der Konvention nach.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install ALSA headers (cpal-Build-Abhängigkeit unter Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo clippy (keine Warnungen erlaubt)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo fmt --check
+        run: cargo fmt --check

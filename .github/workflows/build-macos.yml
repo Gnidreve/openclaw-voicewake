@@ -14,6 +14,13 @@ permissions:
   contents: write
 
 jobs:
+  # Dieselben Prüfungen wie test.yml (dort auch als eigener Pflicht-Check auf
+  # jedem Pull Request) - hier als Job eingebunden, damit der macOS-Build
+  # unten technisch per `needs:` davon abhängt und nicht nur der Konvention
+  # nach erst nach grünen Tests laufen sollte.
+  test:
+    uses: ./.github/workflows/test.yml
+
   # Entscheidet auf einem günstigen Ubuntu-Runner, ob überhaupt gebaut werden
   # muss. Ohne diesen Schritt würde jeder Merge nach main einen macOS-Runner
   # beschäftigen (die zehnfach gewichtet abgerechnet werden), obwohl es meist
@@ -106,7 +113,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build:
-    needs: plan
+    needs: [test, plan]
     if: needs.plan.outputs.build == 'true'
     runs-on: macos-latest
     steps:
