@@ -181,23 +181,6 @@ Ausgangspunkt für künftige Iterationen.
 nicht noch mehr KI, sondern Prozesssteuerung, Event-Eingang, Queueing und
 Streaming.
 
-## Zwischenmeldungen ("Okay, ich schau mir das an ...")
-
-Gewünschtes Verhalten (wie früher in Telegram): nach Eingabe sofort eine
-Empfangsbestätigung, optional Zwischenstatus während der Bearbeitung, dann
-erst die eigentliche Antwort - statt nur eines einzelnen finalen Ergebnisses.
-
-- Das ist **kein** Token-Streaming, sondern mehrere getrennte Nachrichten
-  (Dispatches).
-- Der aktuelle Aufruf `openclaw agent --json` ist ein synchroner RPC: eine
-  Eingabe rein, eine fertige JSON-Antwort zurück. `--deliver` liefert die
-  fertige Antwort aus, schaltet aber keine Zwischenmeldungen frei.
-- **Ohne Rust-Neubuild näherungsweise machbar:** Der OpenClaw-Adapter spricht
-  vor dem eigentlichen CLI-Aufruf sofort eine feste Empfangsbestätigung über
-  Piper. Danach läuft der Agent-Aufruf wie bisher, die finale Antwort geht
-  wie gewohnt an Rust/Piper.
-- Für **echte**, agentengenerierte Zwischenmeldungen (nicht nur eine feste
-  Phrase) braucht es Gateway-Events statt des CLI-RPC-Aufrufs.
 
 ## Untersuchung: OpenClaw-Gateway-WebSocket für echtes Streaming-Verhalten
 
