@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::process::Stdio;
+use std::time::Instant;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
@@ -81,6 +82,30 @@ pub fn extract_response(stdout: &str) -> String {
 /// Übergibt den Transkript-Text über das konfigurierte CLI an OpenClaw und
 /// liefert den Antworttext zurück.
 pub async fn send_to_openclaw(cfg: &OpenClawConfig, transcript: &str) -> Result<String> {
+    let args = build_openclaw_args(cfg, transcript);
+    info!(channel = %cfg.target_channel, "Sende Transkript an OpenClaw");
+    run_openclaw(cfg, &args).await
+}
+
+/// Schickt `message` unverändert (ohne den `message_template`-Umschlag) als
+/// `{message}` an das CLI. Für Steuernachrichten wie den Session-Reset
+/// gedacht, die kein Transkript sind und nicht in dessen Formregeln
+/// eingepackt werden dürfen.
+async fn send_raw_to_openclaw(cfg: &OpenClawConfig, message: &str) -> Result<String> {
+    let replacements = [
+        (CHANNEL_PLACEHOLDER, cfg.target_channel.as_str()),
+        (MESSAGE_PLACEHOLDER, message),
+    ];
+    let args: Vec<String> = cfg
+        .args
+        .iter()
+        .map(|arg| substitute(arg, &replacements))
+        .collect();
+    info!(channel = %cfg.target_channel, "Sende Steuernachricht an OpenClaw");
+    run_openclaw(cfg, &args).await
+}
+
+async fn run_openclaw(cfg: &OpenClawConfig, args: &[String]) -> Result<String> {
     if cfg.target_channel.trim().is_empty() {
         bail!(
             "openclaw.target_channel ist leer - Abbruch, um kein unbeabsichtigtes \
@@ -88,11 +113,8 @@ pub async fn send_to_openclaw(cfg: &OpenClawConfig, transcript: &str) -> Result<
         );
     }
 
-    let args = build_openclaw_args(cfg, transcript);
-    info!(channel = %cfg.target_channel, "Sende Transkript an OpenClaw");
-
     let mut cmd = Command::new(&cfg.binary);
-    cmd.args(&args)
+    cmd.args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -111,6 +133,41 @@ pub async fn send_to_openclaw(cfg: &OpenClawConfig, transcript: &str) -> Result<
     }
 
     Ok(extract_response(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Reine Entscheidung, ob vor der nächsten Nachricht erst ein Session-Reset
+/// nötig ist - unabhängig testbar ohne echten Zeitablauf, da `Instant`s aus
+/// der Vergangenheit direkt konstruierbar sind (`Instant::now() -
+/// Duration::from_secs(x)`).
+pub fn reset_due(cfg: &OpenClawConfig, last_message_at: Option<Instant>) -> bool {
+    if cfg.session_reset_after_secs == 0 {
+        return false;
+    }
+    let Some(last) = last_message_at else {
+        // Noch nie eine Nachricht gesendet - kein Reset nötig, es gibt noch
+        // keine alte Session, die veralten könnte.
+        return false;
+    };
+    last.elapsed() >= Duration::from_secs(cfg.session_reset_after_secs)
+}
+
+/// Schickt bei Bedarf `session_reset_message`, bevor die eigentliche
+/// Nachricht folgt. Ein Fehlschlag hier ist nicht kritisch für die laufende
+/// Runde - das Aufrufen kümmert sich darum, ihn nur zu loggen statt die
+/// Runde daran abbrechen zu lassen.
+pub async fn maybe_reset_session(
+    cfg: &OpenClawConfig,
+    last_message_at: Option<Instant>,
+) -> Result<()> {
+    if !reset_due(cfg, last_message_at) {
+        return Ok(());
+    }
+    info!(
+        after_secs = cfg.session_reset_after_secs,
+        "Session-Reset wegen Inaktivität - sende {}", cfg.session_reset_message
+    );
+    send_raw_to_openclaw(cfg, &cfg.session_reset_message).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -281,5 +338,52 @@ mod tests {
         };
         let result = send_to_openclaw(&cfg, "hallo").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn reset_is_not_due_without_any_prior_message() {
+        let cfg = OpenClawConfig::default();
+        assert!(!reset_due(&cfg, None));
+    }
+
+    #[test]
+    fn reset_is_disabled_when_session_reset_after_secs_is_zero() {
+        let cfg = OpenClawConfig {
+            session_reset_after_secs: 0,
+            ..Default::default()
+        };
+        let long_ago = Instant::now() - Duration::from_secs(999_999);
+        assert!(!reset_due(&cfg, Some(long_ago)));
+    }
+
+    #[test]
+    fn reset_is_not_due_before_the_configured_threshold() {
+        let cfg = OpenClawConfig {
+            session_reset_after_secs: 3600,
+            ..Default::default()
+        };
+        let recent = Instant::now() - Duration::from_secs(10);
+        assert!(!reset_due(&cfg, Some(recent)));
+    }
+
+    #[test]
+    fn reset_is_due_once_the_threshold_is_reached() {
+        let cfg = OpenClawConfig {
+            session_reset_after_secs: 3600,
+            ..Default::default()
+        };
+        let long_ago = Instant::now() - Duration::from_secs(3601);
+        assert!(reset_due(&cfg, Some(long_ago)));
+    }
+
+    #[tokio::test]
+    async fn maybe_reset_session_is_a_no_op_when_no_reset_is_due() {
+        let cfg = OpenClawConfig {
+            target_channel: "".into(),
+            ..Default::default()
+        };
+        // Ohne fälligen Reset darf hier kein CLI-Aufruf (und damit auch kein
+        // Fehler wegen des leeren Zielkanals) ausgelöst werden.
+        assert!(maybe_reset_session(&cfg, None).await.is_ok());
     }
 }
