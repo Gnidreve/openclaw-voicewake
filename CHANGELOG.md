@@ -14,6 +14,44 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-31
+
+### Hinzugefügt
+
+- Neuer Konfig-Schalter `openclaw.audio_pipeline = "local"` (Standard,
+  unverändert: ffmpeg-Normalisierung + `whisper-cli`) oder `"gateway"`
+  (Transkription über eine OpenClaw-Gateway-Talk-Session statt lokal) -
+  orthogonal zu `transport`, setzt aber `transport = "websocket"` voraus
+  (eigene, unabhängige Gateway-Verbindung für die Transkription, getrennt
+  von der `chat.send`-Verbindung für die Antwort). Beide Wege werden
+  dauerhaft unterstützt, keiner ist nur ein Fallback für den anderen.
+- Ablauf bei `audio_pipeline = "gateway"`
+  (`gateway_client::transcribe_via_gateway`): `talk.session.create`
+  (`mode: "transcription"`, `transport: "gateway-relay"`, `brain: "none"`)
+  -> Aufnahme zu G.711 mu-law/8kHz/mono konvertieren
+  (`transcribe::convert_to_gateway_mulaw`) -> in Chunks per
+  `talk.session.appendAudio` streamen -> `talk.session.close` -> Transkript
+  aus den `talk.event`-Nachrichten zusammensetzen. Anders als bei
+  `chat.send` ist kein vorheriges `sessions.messages.subscribe` nötig -
+  Talk-Events gehen direkt an die anfragende Verbindung.
+- **Wichtiger Fund gegenüber der Recherchegrundlage**
+  ([`Gateway-Transcription.md`](Gateway-Transcription.md), ausdrücklich als
+  ungeprüft markiert): Die Gateway-Talk-Transkriptionssession erwartet fest
+  G.711 mu-law bei 8kHz (Telefonqualität), nicht PCM16/24kHz wie dort
+  angenommen - das ist das Format des separaten Realtime-Voice-Pfads. Der
+  tatsächliche Server-Code lehnt jede andere Kombination beim
+  `talk.session.create` ab; `transcribe_via_gateway` prüft das Format aus
+  der Server-Antwort defensiv nach, statt es blind anzunehmen.
+- Session-Reset (`session_reset_after_secs`) markiert jetzt zusätzlich im
+  `transcription_log` sichtbar den Beginn der neuen Session
+  (`transcript_log::log_session_reset`, `----------- [NEW] ------------`)
+  - vorher sah man im Log nicht, ab wo der bisherige Kontext nicht mehr
+    gilt.
+- Neuer Mock-Gateway-Feature-Test
+  (`tests/pipeline_gateway_audio_pipeline_with_stubs.rs`), der den
+  kompletten `talk.session`-Ablauf inklusive base64-kodierter Audio-Chunks
+  gegen ein Mock-Gateway abdeckt.
+
 ## [0.2.4] - 2026-08-30
 
 ### Behoben
@@ -517,7 +555,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.1...v0.2.2

@@ -72,7 +72,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `audio.rs` | CoreAudio-Aufnahme, WAV schreiben |
 | `vad.rs` | Stille-/Sprach-Erkennung (reine Logik, gut testbar) |
 | `wakeword.rs` | Wake-Word-Prozess starten, auf Trigger-Zeile warten |
-| `transcribe.rs` | ffmpeg-Normalisierung, whisper-cli |
+| `transcribe.rs` | ffmpeg-Normalisierung (16kHz PCM für whisper-cli, G.711 mu-law/8kHz für die Gateway-Transkription), whisper-cli |
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
 | `tts.rs` | Piper-Aufruf, Wiedergabe |
@@ -83,7 +83,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 | `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
-| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`) |
+| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`), `talk.session.*` für die Gateway-Transkription (`audio_pipeline = "gateway"`) |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
@@ -284,6 +284,38 @@ Fehler fehl, sondern mit `INVALID_REQUEST` gegen ein Schema, das
 p.idempotencyKey`) identisch mit dem `runId`, das ACK und alle folgenden
 `chat`-Events tragen - das selbst vergebene UUID muss deshalb nicht aus
 der Server-Antwort zurückgelesen werden, um eigene Events zu erkennen.
+
+**Die Gateway-Talk-Transkriptionssession erwartet fest G.711 mu-law/8kHz,
+nicht PCM16/24kHz.** `Gateway-Transcription.md` ist ausdrücklich als
+ungeprüfte Recherchegrundlage markiert - und lag beim Audioformat
+nachweislich falsch: Sie nennt PCM16/24kHz, das ist aber das Format des
+separaten Realtime-Voice-Pfads (`mode: "realtime"`). Der tatsächliche
+Server-Code für `mode: "transcription"`
+(`assertRelayInputAudioConfig`/`RELAY_INPUT_ENCODING`/
+`RELAY_INPUT_SAMPLE_RATE_HZ` in `talk-transcription-relay.ts`) verlangt
+hart G.711 mu-law bei 8kHz und lehnt jede andere Provider-Konfiguration
+serverseitig ab - keine freie Wahl, keine Config-Option auf unserer
+Seite. `transcribe_via_gateway` prüft das Audioformat aus der
+`talk.session.create`-Antwort trotzdem defensiv nach (`TALK_EXPECTED_AUDIO_*`
+in `gateway_client.rs`), statt blind zu senden - ändert sich der Wert in
+einer künftigen OpenClaw-Version, soll das einen klaren Fehler geben statt
+stillschweigend falsches Audio zu schicken.
+
+**`talk.event` braucht kein `sessions.messages.subscribe` - anders als
+`chat`.** Der Server sendet Talk-Events direkt an die anfragende
+Verbindung (`context.broadcastToConnIds`, siehe
+`talk-transcription-relay.ts`), nicht an ein Session-Key-Topic wie
+`chat`-Events (siehe `chat-broadcast.ts`). Ein Subscribe-Schritt vor
+`talk.session.create` wäre wirkungslose Zusatzarbeit, kein Sicherheitsnetz.
+
+**Während `transcribe_via_gateway` auf die Antwort zu `appendAudio`/`close`
+wartet, dürfen zwischenzeitlich ankommende `talk.event`s nicht verworfen
+werden.** Der STT-Provider kann ein Transkript liefern, bevor der nächste
+Request überhaupt bestätigt ist. `read_response` (aus dem `chat.send`-Pfad)
+verwirft alle Nicht-`res`-Frames stillschweigend - für Talk deshalb die
+eigene `await_talk_response_collecting_events`, die `talk.event`s
+währenddessen in den `TalkTranscriptCollector` einsammelt, statt sie zu
+überspringen.
 
 ## Konfiguration
 
