@@ -335,6 +335,37 @@ openclaw-voicebridge --config config.toml --probe-gateway
 es ist ein Diagnose-Werkzeug für Verbindung/Kopplung, keine Möglichkeit,
 eine echte Nachricht ohne die volle Sprachpipeline abzuschicken.
 
+## Transkription über das Gateway (`audio_pipeline = "gateway"`)
+
+Alternative zu ffmpeg + whisper-cli: `openclaw.audio_pipeline = "gateway"`
+lässt das OpenClaw-Gateway transkribieren, statt lokal Whisper aufzurufen.
+Beide Wege werden dauerhaft unterstützt, `"local"` bleibt Standard und
+vollwertiger Weg - keine Abkündigung. Setzt `transport = "websocket"`
+voraus (eigene, unabhängige Gateway-Verbindung für die Transkription,
+getrennt von der `chat.send`-Verbindung für die Antwort):
+
+```toml
+[openclaw]
+transport = "websocket"
+audio_pipeline = "gateway"
+gateway_host = "127.0.0.1"
+gateway_port = 18789
+```
+
+Ablauf: `talk.session.create` (`mode = "transcription"`, `transport =
+"gateway-relay"`, `brain = "none"`) -> die Aufnahme wird zu G.711
+mu-law/8kHz/mono konvertiert und in Chunks per `talk.session.appendAudio`
+gestreamt -> `talk.session.close` -> das Transkript kommt über
+`talk.event`-Nachrichten zurück, die die Bridge zum vollständigen Text
+zusammensetzt.
+
+**Audioqualität beachten:** Die Gateway-Talk-Session erwartet fest G.711
+mu-law bei 8kHz (Telefonqualität) - das ist eine vom Gateway-Quellcode
+vorgegebene, nicht verhandelbare Anforderung für diesen Pfad, keine freie
+Konfiguration. Das ist spürbar geringer aufgelöst als die 16kHz, mit denen
+`audio_pipeline = "local"` an whisper-cli übergibt. Wer auf
+Transkriptionsqualität angewiesen ist, bleibt bei `"local"`.
+
 ## CLI-Adapter-Verträge
 
 ### Wake-Word-Kommando (`wakeword.command`)
@@ -523,6 +554,16 @@ Schritt:
 - `[Output] error` - der OpenClaw-Aufruf oder die Piper-Wiedergabe ist
   fehlgeschlagen (der Zyklus bricht in diesem Fall danach regulär ab und
   spielt den [Fehlerton](#fehlerton) ab).
+
+Ein Session-Reset (`session_reset_after_secs`) markiert im Log zusätzlich
+den Beginn der neuen Session, mit einer leeren Zeile davor:
+
+```
+[Output] "Auch Hallo"
+
+----------- [NEW] ------------
+[Input] "Hallo, wer bist du?"
+```
 
 ## Transkript-Filter
 

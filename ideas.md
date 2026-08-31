@@ -39,6 +39,32 @@ veröffentlichte Punkte stehen nicht mehr hier, sondern in
   Neustart pro Zyklus war die Quelle mehrerer Feldtest-Fehler. In Rust wäre
   es ein einziger Mikrofon-Besitzer, kostet aber eine ONNX-Runtime und die
   Nachbildung der openWakeWord-Vorverarbeitung.
+- Eine Standardauswahl (5) verschiedener Wake-Word-Modelle direkt in den
+  Release-Build packen, statt sie separat nachziehen zu müssen - Nutzer
+  wählt in der Config nur noch den Modellnamen, ohne das Modell selbst
+  besorgen zu müssen. Offen: welche 5, Lizenzfragen der openWakeWord-Modelle,
+  wie stark das den Release-Build/das ZIP aufbläht.
 
 ## Android Applikation für remote Verbindungen vom Handy
 - Eigene Release Datei für Android getrennt vom eigentlichen macos release. Durch die implementierung der websocket verbindung sollte jede version und jedes zielsystem im modus websocket 
+
+## Perspektivisch: lokales Whisper/Piper/CLI ganz entfernen, wenn der Gateway-Pfad trägt
+
+Kein Teil von 0.2.5/0.2.6 - die bauen `audio_pipeline = "gateway"` nur als
+zweite, gleichberechtigte Option neben `"local"` (Whisper/Piper bleiben
+vollwertig, nichts wird deswegen gelöscht oder abgekündigt). Diese Idee
+ist eine mögliche, spätere Konsequenz, falls sich der Gateway-Pfad im
+Feld bewährt:
+
+- Zielszenario: OpenClaw als alleiniger STT/TTS-Provider - eine zentrale
+  Quelle der Wahrheit, die auch andere Kanäle/Agenten nutzen, statt
+  Sprachein-/ausgabe einmal hier lokal (Whisper/Piper) und einmal dort
+  über das Gateway konfiguriert zu haben.
+- Erst relevant, sobald `audio_pipeline = "gateway"` (0.2.5/0.2.6) im
+  Dauerbetrieb bewiesen ist - keine Vorwegnahme, kein Zeitdruck.
+- Würde dann bedeuten: lokale Whisper-/Piper-Abhängigkeiten entfernen,
+  `transport = "cli"` als Ganzes rausnehmen (nur noch WebSocket-Verbindung
+  möglich) - auch um die Config spürbar zu verschlanken.
+- Offen/unkonkret: ob das wirklich eine vollständige Abkündigung wird oder
+  `"local"` als Fallback für Offline-Betrieb doch erhalten bleibt - dazu
+  gibt es noch keine Entscheidung.
