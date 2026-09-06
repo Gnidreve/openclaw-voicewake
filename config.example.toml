@@ -151,6 +151,13 @@ gateway_port = 18789
 # Antwort kommt erst über gestreamte Events nach) - das Pendant zum "Ich
 # schau mir das an" aus Telegram.
 interim_message = "Einen Moment, ich schaue nach."
+# "local" (Standard, ffmpeg + whisper-cli) oder "gateway" (Transkription
+# über eine OpenClaw-Gateway-Talk-Session statt lokal) - beide werden
+# dauerhaft unterstützt, keiner ist nur ein Fallback für den anderen.
+# Setzt transport = "websocket" voraus (eigene Verbindung, unabhängig vom
+# chat.send-Pfad). Achtung Audioqualität: die Gateway-Session erwartet fest
+# G.711 mu-law/8kHz (Telefonqualität), nicht das 16kHz von whisper-cli.
+audio_pipeline = "local"
 
 # Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:
 # binary = "/opt/homebrew/bin/openclaw"

@@ -39,14 +39,18 @@ absichtlich verworfen wurde.
 ## Was sich hier nicht prüfen lässt - und was trotzdem
 
 Die Zielplattform ist macOS auf Apple Silicon. CoreAudio-Verhalten,
-Mikrofonrechte, das echte whisper.cpp, Piper und OpenClaw lassen sich nur
-dort testen. Entwickelt und geprüft wird trotzdem meist unter Linux.
+Mikrofonrechte (TCC), das echte whisper.cpp, Piper, OpenClaw und ein
+echtes Gateway lassen sich nur dort testen. Entwickelt und geprüft wird
+trotzdem meist unter Linux, ohne echte Hardware.
 
-Damit das kein blinder Fleck bleibt, gibt es zwei Integrationstests:
+Damit das kein blinder Fleck bleibt, gibt es mehrere Integrationstests:
 
 | Test | Braucht | Läuft bei `cargo test` |
 |---|---|---|
 | `tests/pipeline_with_stubs.rs` | nur `/bin/sh` | **ja** |
+| `tests/pipeline_websocket_with_stubs.rs` | nur `/bin/sh` + Mock-Gateway | **ja** |
+| `tests/pipeline_gateway_audio_pipeline_with_stubs.rs` | nur `/bin/sh` + Mock-Gateway | **ja** |
+| `tests/gateway_probe_with_mock_server.rs` | Mock-Gateway (kein echtes OpenClaw) | **ja** |
 | `tests/dry_run.rs` | echtes ffmpeg, whisper-cli + Modell, piper, openclaw | nein (`#[ignore]`) |
 
 `pipeline_with_stubs` legt Stub-Programme in einem Temp-Verzeichnis an, die
@@ -54,7 +58,10 @@ sich wie die echten verhalten und **mit Exit-Code 3 abbrechen, wenn die
 Aufrufform nicht stimmt** - Piper muss als venv-Python mit `-m piper`
 zuerst aufgerufen werden, OpenClaw mit Subkommando `agent` und dem
 richtigen `--session-key`. Dann läuft eine vollständige Runde durch:
-Transkript → Umschlag → JSON-Antwort → Sprachausgabe.
+Transkript → Umschlag → JSON-Antwort → Sprachausgabe. Die beiden
+`*_with_stubs`-Varianten für `transport = "websocket"`/
+`audio_pipeline = "gateway"` spiegeln das für den jeweiligen
+Gateway-Pfad, gegen ein selbstgebautes Mock-Gateway statt echtem OpenClaw.
 
 **Das ist das Werkzeug der Wahl für eine Änderung an der Prozesskette.**
 Wer eine solche Änderung macht, sollte den Test einmal absichtlich brechen
@@ -62,6 +69,26 @@ und sehen, dass er rot wird - ein Test, der immer grün ist, prüft nichts.
 
 Für alles Weitere: `--dry-run --dry-run-file <wav> --once` ersetzt nur die
 Mikrofonaufnahme, der Rest läuft real.
+
+**Diese Mock-/Stub-Tests ersetzen keinen echten Hardware-Test.** Mehrere
+Bugs in diesem Projekt (die TCC-Mikrofon-Regression aus 0.1.9, der
+ffmpeg-`tcsetattr`-Hänger, das `client.id`/`client.mode`-Enum-Problem)
+wurden ausschließlich im echten Feldtest auf dem Ziel-Mac gefunden - kein
+Mock hätte sie gefangen, weil sie an macOS-spezifischem oder
+gateway-spezifischem Verhalten hingen, das ein Mock per Definition nicht
+nachbildet. Der reale Testweg für dieses Projekt: eine separate
+KI-Instanz mit Terminal-Zugriff auf dem Ziel-Mac (dort, wo auch die
+GitHub-Release-Binaries installiert werden) baut den zu testenden Branch,
+startet die Bridge **in einem für den Menschen sichtbaren, selbst
+geöffneten Terminal-Fenster** (nicht per Automation/AppleScript
+gestartet - das kann auf macOS die TCC-Berechtigungskette brechen, siehe
+Invariante weiter unten) und berichtet Log-Ausschnitte/Beobachtungen
+zurück. Wer an diesem Projekt ohne Zugriff auf echte macOS-Hardware
+arbeitet, sollte Änderungen an `audio.rs`/`wakeword.rs`/`transcribe.rs`/
+`tts.rs`/`child_process.rs` explizit als "auf echter Hardware noch nicht
+verifiziert" kennzeichnen (PR-Beschreibung, Commit-Nachricht) statt
+stillschweigend als fertig zu behandeln, nur weil die Stub-Tests grün
+sind.
 
 ## Module
 
@@ -72,7 +99,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `audio.rs` | CoreAudio-Aufnahme, WAV schreiben |
 | `vad.rs` | Stille-/Sprach-Erkennung (reine Logik, gut testbar) |
 | `wakeword.rs` | Wake-Word-Prozess starten, auf Trigger-Zeile warten |
-| `transcribe.rs` | ffmpeg-Normalisierung, whisper-cli |
+| `transcribe.rs` | ffmpeg-Normalisierung (16kHz PCM für whisper-cli, G.711 mu-law/8kHz für die Gateway-Transkription), whisper-cli |
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
 | `tts.rs` | Piper-Aufruf, Wiedergabe |
@@ -83,7 +110,7 @@ Mikrofonaufnahme, der Rest läuft real.
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 | `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
-| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`) |
+| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`), `talk.session.*` für die Gateway-Transkription (`audio_pipeline = "gateway"`) |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
@@ -284,6 +311,38 @@ Fehler fehl, sondern mit `INVALID_REQUEST` gegen ein Schema, das
 p.idempotencyKey`) identisch mit dem `runId`, das ACK und alle folgenden
 `chat`-Events tragen - das selbst vergebene UUID muss deshalb nicht aus
 der Server-Antwort zurückgelesen werden, um eigene Events zu erkennen.
+
+**Die Gateway-Talk-Transkriptionssession erwartet fest G.711 mu-law/8kHz,
+nicht PCM16/24kHz.** `Gateway-Transcription.md` ist ausdrücklich als
+ungeprüfte Recherchegrundlage markiert - und lag beim Audioformat
+nachweislich falsch: Sie nennt PCM16/24kHz, das ist aber das Format des
+separaten Realtime-Voice-Pfads (`mode: "realtime"`). Der tatsächliche
+Server-Code für `mode: "transcription"`
+(`assertRelayInputAudioConfig`/`RELAY_INPUT_ENCODING`/
+`RELAY_INPUT_SAMPLE_RATE_HZ` in `talk-transcription-relay.ts`) verlangt
+hart G.711 mu-law bei 8kHz und lehnt jede andere Provider-Konfiguration
+serverseitig ab - keine freie Wahl, keine Config-Option auf unserer
+Seite. `transcribe_via_gateway` prüft das Audioformat aus der
+`talk.session.create`-Antwort trotzdem defensiv nach (`TALK_EXPECTED_AUDIO_*`
+in `gateway_client.rs`), statt blind zu senden - ändert sich der Wert in
+einer künftigen OpenClaw-Version, soll das einen klaren Fehler geben statt
+stillschweigend falsches Audio zu schicken.
+
+**`talk.event` braucht kein `sessions.messages.subscribe` - anders als
+`chat`.** Der Server sendet Talk-Events direkt an die anfragende
+Verbindung (`context.broadcastToConnIds`, siehe
+`talk-transcription-relay.ts`), nicht an ein Session-Key-Topic wie
+`chat`-Events (siehe `chat-broadcast.ts`). Ein Subscribe-Schritt vor
+`talk.session.create` wäre wirkungslose Zusatzarbeit, kein Sicherheitsnetz.
+
+**Während `transcribe_via_gateway` auf die Antwort zu `appendAudio`/`close`
+wartet, dürfen zwischenzeitlich ankommende `talk.event`s nicht verworfen
+werden.** Der STT-Provider kann ein Transkript liefern, bevor der nächste
+Request überhaupt bestätigt ist. `read_response` (aus dem `chat.send`-Pfad)
+verwirft alle Nicht-`res`-Frames stillschweigend - für Talk deshalb die
+eigene `await_talk_response_collecting_events`, die `talk.event`s
+währenddessen in den `TalkTranscriptCollector` einsammelt, statt sie zu
+überspringen.
 
 ## Konfiguration
 

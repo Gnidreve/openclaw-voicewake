@@ -53,6 +53,15 @@ pub async fn log_output(cfg: &TranscriptionLogConfig, outcome: OutputOutcome<'_>
     write_line(cfg, &format_output_line(&outcome)).await;
 }
 
+/// Markiert im Log den Beginn einer neuen OpenClaw-Session nach einem
+/// Session-Reset (siehe `openclaw::reset_due`) - sonst sieht man im Log
+/// nicht, ab wo der Kontext der vorherigen Session nicht mehr gilt. Die
+/// leere Zeile davor trennt optisch vom vorherigen Block.
+pub async fn log_session_reset(cfg: &TranscriptionLogConfig) {
+    write_line(cfg, "").await;
+    write_line(cfg, "----------- [NEW] ------------").await;
+}
+
 async fn write_line(cfg: &TranscriptionLogConfig, line: &str) {
     if !cfg.enabled {
         return;
@@ -76,6 +85,39 @@ async fn append(cfg: &TranscriptionLogConfig, line: &str) -> std::io::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: Ohne eine sichtbare Markierung sieht man im Log nicht,
+    /// ab wo ein Session-Reset den bisherigen Kontext beendet hat.
+    #[tokio::test]
+    async fn session_reset_writes_a_blank_line_and_a_new_marker() {
+        let path = std::env::temp_dir().join(format!(
+            "openclaw-voicebridge-test-transcript-log-{}.log",
+            uuid::Uuid::new_v4()
+        ));
+        let cfg = TranscriptionLogConfig {
+            enabled: true,
+            path: path.clone(),
+        };
+        log_input(&cfg, "davor").await;
+        log_session_reset(&cfg).await;
+        log_input(&cfg, "danach").await;
+
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .expect("Log sollte lesbar sein");
+        let _ = std::fs::remove_file(&path);
+
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines,
+            vec![
+                "[Input] \"davor\"",
+                "",
+                "----------- [NEW] ------------",
+                "[Input] \"danach\"",
+            ]
+        );
+    }
 
     #[test]
     fn input_line_shows_transcript_in_quotes() {

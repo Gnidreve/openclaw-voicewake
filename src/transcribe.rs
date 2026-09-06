@@ -66,6 +66,65 @@ pub async fn normalize_audio(
     Ok(())
 }
 
+/// Reine Argument-Konstruktion für die G.711-mu-law-Konvertierung
+/// (`audio_pipeline = "gateway"`, siehe `gateway_client::transcribe_via_gateway`).
+/// `-f mulaw` erzeugt eine rohe, headerlose Sample-Datei (kein WAV-Container) -
+/// genau die Bytes, die unverändert base64-kodiert an
+/// `talk.session.appendAudio` gehen. G.711 mu-law/8kHz/mono ist keine freie
+/// Wahl, sondern eine vom Gateway fest vorgegebene, nicht verhandelbare
+/// Kontrakt-Anforderung (`RELAY_INPUT_ENCODING`/`RELAY_INPUT_SAMPLE_RATE_HZ`
+/// in `talk-transcription-relay.ts`) - spürbar geringere Audioqualität als
+/// der lokale 16kHz-Pfad, das ist kein Bug.
+pub fn build_ffmpeg_mulaw_args(input: &Path, output: &Path) -> Vec<String> {
+    vec![
+        // Siehe `build_ffmpeg_args` - derselbe TTY-Hänger droht hier genauso.
+        "-nostdin".to_string(),
+        "-y".to_string(),
+        "-i".to_string(),
+        input.to_string_lossy().to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-ar".to_string(),
+        "8000".to_string(),
+        "-f".to_string(),
+        "mulaw".to_string(),
+        output.to_string_lossy().to_string(),
+    ]
+}
+
+/// Konvertiert eine beliebige WAV-Datei zu rohem G.711-mu-law/8kHz/mono, wie
+/// von der Gateway-Talk-Transkriptionssession erwartet.
+pub async fn convert_to_gateway_mulaw(
+    general: &GeneralConfig,
+    input: &Path,
+    output: &Path,
+    timeout_secs: u64,
+) -> Result<()> {
+    let args = build_ffmpeg_mulaw_args(input, output);
+    info!(
+        ?input,
+        ?output,
+        "Konvertiere Audio zu G.711 mu-law/8kHz für die Gateway-Transkription"
+    );
+
+    let mut cmd = Command::new(&general.ffmpeg_binary);
+    cmd.args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let (child, _pg_guard) = spawn_isolated(&mut cmd).context("Kann ffmpeg nicht starten")?;
+    let out = timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+        .await
+        .context("Timeout bei ffmpeg-mu-law-Konvertierung")??;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        bail!("ffmpeg fehlgeschlagen: {stderr}");
+    }
+    Ok(())
+}
+
 /// Reine Argument-Konstruktion für whisper-cli, unabhängig testbar.
 pub fn build_whisper_args(cfg: &WhisperConfig, wav_path: &Path, out_stem: &Path) -> Vec<String> {
     let mut args = vec![
@@ -193,5 +252,23 @@ mod tests {
     fn ffmpeg_args_disable_stdin_to_avoid_a_terminal_ioctl_hang() {
         let args = build_ffmpeg_args(Path::new("in.wav"), Path::new("out.wav"));
         assert!(args.contains(&"-nostdin".to_string()));
+    }
+
+    /// Regression-Anker: `talk-transcription-relay.ts` erwartet fest
+    /// G.711 mu-law/8kHz/mono, nicht PCM16/24kHz wie ursprünglich aus der
+    /// (ausdrücklich als ungeprüft markierten) Recherchegrundlage
+    /// `Gateway-Transcription.md` angenommen - dort steht das Format des
+    /// separaten Realtime-Voice-Pfads, nicht des Transkriptions-Pfads.
+    #[test]
+    fn ffmpeg_mulaw_args_convert_to_mono_8k_headerless_mulaw() {
+        let args = build_ffmpeg_mulaw_args(Path::new("in.wav"), Path::new("out.raw"));
+        assert!(args.contains(&"-nostdin".to_string()));
+        assert!(args.contains(&"-ac".to_string()));
+        assert!(args.contains(&"1".to_string()));
+        assert!(args.contains(&"-ar".to_string()));
+        assert!(args.contains(&"8000".to_string()));
+        assert!(args.contains(&"-f".to_string()));
+        assert!(args.contains(&"mulaw".to_string()));
+        assert_eq!(args.last(), Some(&"out.raw".to_string()));
     }
 }

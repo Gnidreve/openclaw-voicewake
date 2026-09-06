@@ -199,6 +199,21 @@ pub enum Transport {
     Websocket,
 }
 
+/// Woher die Transkription kommt. `Local` bleibt der vollwertige Legacy-Pfad
+/// (ffmpeg-Normalisierung + `whisper-cli`, siehe `transcribe.rs`), `Gateway`
+/// ersetzt das durch eine OpenClaw-Gateway-Talk-Session (siehe
+/// `gateway_client::transcribe_via_gateway`) - beide werden dauerhaft
+/// unterstützt. Orthogonal zu `Transport`, aber `Gateway` setzt
+/// `transport = "websocket"` voraus (siehe `Config::validate`), da die
+/// Talk-Session dieselbe Gateway-Verbindung braucht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioPipeline {
+    #[default]
+    Local,
+    Gateway,
+}
+
 /// Wrapper um das Gateway-Token, damit das automatisch abgeleitete
 /// `#[derive(Debug)]` von `OpenClawConfig` es nicht versehentlich in Logs
 /// oder Fehlermeldungen ausgibt.
@@ -276,6 +291,8 @@ pub struct OpenClawConfig {
     /// selbst non-blocking ist und die eigentliche Antwort erst über
     /// gestreamte `chat`-Events nachkommt (siehe `gateway_client.rs`).
     pub interim_message: String,
+    /// `"local"` (Standard) oder `"gateway"`. Siehe `AudioPipeline`.
+    pub audio_pipeline: AudioPipeline,
 }
 impl Default for OpenClawConfig {
     fn default() -> Self {
@@ -297,6 +314,7 @@ impl Default for OpenClawConfig {
             gateway_port: 18789,
             gateway_token: GatewayToken::default(),
             interim_message: "Einen Moment, ich schaue nach.".to_string(),
+            audio_pipeline: AudioPipeline::Local,
         }
     }
 }
@@ -500,7 +518,14 @@ impl Config {
                 crate::tts::OUTPUT_PLACEHOLDER
             );
         }
-        if !dry_run && !self.whisper.model_path.exists() {
+        // Bei `audio_pipeline = "gateway"` läuft die Transkription über das
+        // Gateway (siehe `gateway_client::transcribe_via_gateway`) - ein
+        // lokales Whisper-Modell wird dann nicht mehr gebraucht und muss
+        // deshalb auch nicht vorhanden sein.
+        if !dry_run
+            && self.openclaw.audio_pipeline == AudioPipeline::Local
+            && !self.whisper.model_path.exists()
+        {
             anyhow::bail!(
                 "Whisper-Modell nicht gefunden: {}",
                 self.whisper.model_path.display()
@@ -555,6 +580,18 @@ impl Config {
                     "openclaw.gateway_port ist 0, obwohl transport = \"websocket\" gesetzt ist."
                 );
             }
+        }
+
+        // Die Gateway-Talk-Session für die Transkription braucht dieselbe
+        // Gateway-Verbindung wie `chat.send` - ohne `transport = "websocket"`
+        // gibt es keine Verbindung, über die sie laufen könnte.
+        if self.openclaw.audio_pipeline == AudioPipeline::Gateway
+            && self.openclaw.transport != Transport::Websocket
+        {
+            anyhow::bail!(
+                "openclaw.audio_pipeline = \"gateway\" setzt transport = \"websocket\" voraus \
+                 (die Transkription läuft über dieselbe Gateway-Verbindung)."
+            );
         }
 
         Ok(())
@@ -841,6 +878,58 @@ mod tests {
         cfg.openclaw.gateway_host = String::new();
         cfg.openclaw.gateway_port = 0;
         assert!(cfg.validate(true).is_ok());
+    }
+
+    #[test]
+    fn audio_pipeline_defaults_to_local() {
+        let cfg = OpenClawConfig::default();
+        assert_eq!(cfg.audio_pipeline, AudioPipeline::Local);
+    }
+
+    #[test]
+    fn audio_pipeline_parses_gateway_from_toml() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [openclaw]
+            target_channel = "voice-assistant"
+            transport = "websocket"
+            audio_pipeline = "gateway"
+            "#,
+        )
+        .expect("Konfiguration sollte parsen");
+        assert_eq!(cfg.openclaw.audio_pipeline, AudioPipeline::Gateway);
+    }
+
+    #[test]
+    fn validate_rejects_gateway_audio_pipeline_without_websocket_transport() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.audio_pipeline = AudioPipeline::Gateway;
+        cfg.openclaw.transport = Transport::Cli;
+        let err = cfg.validate(true).unwrap_err();
+        assert!(err.to_string().contains("audio_pipeline"), "{err}");
+    }
+
+    #[test]
+    fn validate_accepts_gateway_audio_pipeline_with_websocket_transport() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.audio_pipeline = AudioPipeline::Gateway;
+        cfg.openclaw.transport = Transport::Websocket;
+        assert!(cfg.validate(true).is_ok());
+    }
+
+    /// Regression: Bei `audio_pipeline = "gateway"` wird kein lokales
+    /// Whisper-Modell gebraucht - die Prüfung darf dann nicht mehr
+    /// fehlschlagen, nur weil `whisper.model_path` nicht existiert.
+    #[test]
+    fn validate_skips_the_whisper_model_check_when_audio_pipeline_is_gateway() {
+        let mut cfg = Config::default();
+        cfg.openclaw.target_channel = "voice-assistant".to_string();
+        cfg.openclaw.audio_pipeline = AudioPipeline::Gateway;
+        cfg.openclaw.transport = Transport::Websocket;
+        cfg.whisper.model_path = "/nicht/vorhanden.bin".into();
+        assert!(cfg.validate(false).is_ok());
     }
 
     /// Ein Gateway-Token ist ein Geheimnis - `{:?}` darf es nie im Klartext

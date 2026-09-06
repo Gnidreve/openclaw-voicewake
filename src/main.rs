@@ -347,33 +347,11 @@ async fn run_round(
 
     sm.transition(State::Transcribing)?;
     let transcript = if speech_detected {
-        let normalized_wav = tmp_dir.join("normalized.wav");
-        cancellable(
-            shutdown,
-            transcribe::normalize_audio(
-                &cfg.general,
-                &raw_wav,
-                &normalized_wav,
-                cfg.whisper.timeout_secs,
-            ),
-        )
-        .await?;
-        // Rohaufnahme wird nach der Normalisierung nicht mehr gebraucht -
-        // unabhängig davon, was mit der Transkription/Antwort danach passiert.
+        let t = transcribe_recording(cfg, shutdown, &raw_wav, tmp_dir).await?;
+        // Rohaufnahme wird nach der Transkription nicht mehr gebraucht -
+        // unabhängig davon, was mit der Antwort danach passiert.
         if let Err(e) = tokio::fs::remove_file(&raw_wav).await {
             warn!(error = %e, path = %raw_wav.display(), "Konnte Rohaufnahme nicht löschen");
-        }
-
-        let t = cancellable(
-            shutdown,
-            transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir),
-        )
-        .await?;
-
-        // Normalisierte Aufnahme wird nach der Transkription nicht mehr
-        // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am Zyklusende.
-        if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
-            warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
         }
         t
     } else {
@@ -495,6 +473,60 @@ async fn run_round(
     Ok(RoundOutcome::Answered)
 }
 
+/// Transkribiert `raw_wav` über den konfigurierten Audio-Pfad. Beide Wege
+/// bleiben dauerhaft vollwertig unterstützt (siehe ROADMAP.md, 0.2.x) - kein
+/// Fallback des einen auf den anderen.
+///
+/// `audio_pipeline = "local"` entspricht unverändert dem bisherigen Ablauf
+/// (ffmpeg-Normalisierung + `whisper-cli`). `audio_pipeline = "gateway"`
+/// ersetzt das durch eine Gateway-Talk-Transkriptionssession (siehe
+/// `gateway_client::transcribe_via_gateway`) - die Audiokonvertierung
+/// (dort: G.711 mu-law/8kHz statt 16kHz PCM) läuft dabei innerhalb dieser
+/// Funktion, nicht hier.
+async fn transcribe_recording(
+    cfg: &Config,
+    shutdown: &AtomicBool,
+    raw_wav: &Path,
+    tmp_dir: &Path,
+) -> Result<String> {
+    match cfg.openclaw.audio_pipeline {
+        config::AudioPipeline::Local => {
+            let normalized_wav = tmp_dir.join("normalized.wav");
+            cancellable(
+                shutdown,
+                transcribe::normalize_audio(
+                    &cfg.general,
+                    raw_wav,
+                    &normalized_wav,
+                    cfg.whisper.timeout_secs,
+                ),
+            )
+            .await?;
+
+            let t = cancellable(
+                shutdown,
+                transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir),
+            )
+            .await?;
+
+            // Normalisierte Aufnahme wird nach der Transkription nicht mehr
+            // gebraucht - vor dem OpenClaw-Aufruf löschen statt erst am
+            // Zyklusende.
+            if let Err(e) = tokio::fs::remove_file(&normalized_wav).await {
+                warn!(error = %e, path = %normalized_wav.display(), "Konnte normalisierte Aufnahme nicht löschen");
+            }
+            Ok(t)
+        }
+        config::AudioPipeline::Gateway => {
+            cancellable(
+                shutdown,
+                gateway_client::transcribe_via_gateway(cfg, raw_wav),
+            )
+            .await
+        }
+    }
+}
+
 /// Schickt `transcript` über den konfigurierten Transport an OpenClaw und
 /// liefert den Antworttext zurück. Beide Transporte bleiben dauerhaft
 /// vollwertig unterstützt (siehe ROADMAP.md, 0.2.x) - kein Fallback des
@@ -517,6 +549,9 @@ async fn send_to_backend(
 ) -> Result<String> {
     match cfg.openclaw.transport {
         Transport::Cli => {
+            if openclaw::reset_due(&cfg.openclaw, *last_openclaw_message_at) {
+                transcript_log::log_session_reset(&cfg.transcription_log).await;
+            }
             // Nicht kritisch für die Runde: Schlägt der Reset fehl, wird
             // trotzdem ganz normal mit der eigentlichen Nachricht
             // weitergemacht - ein Reset-Fehlschlag soll keine sonst
@@ -542,6 +577,7 @@ async fn send_to_backend(
             // Analog zu `maybe_reset_session`, aber über `chat.send` statt
             // das CLI - ebenso unkritisch bei Fehlschlag.
             if openclaw::reset_due(&cfg.openclaw, *last_openclaw_message_at) {
+                transcript_log::log_session_reset(&cfg.transcription_log).await;
                 info!(
                     after_secs = cfg.openclaw.session_reset_after_secs,
                     "Session-Reset wegen Inaktivität - sende {}",

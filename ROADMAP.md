@@ -35,32 +35,6 @@ Unit-Tests in der Datei, ein Mock-Gateway-Feature-Test in `tests/` analog
 zu `tests/pipeline_with_stubs.rs`) - nicht erst gesammelt danach in 0.3.x.
 0.3.x ist für die große strukturelle Aufräumung reserviert, siehe dort.
 
-### 0.2.5 - Transkription über das OpenClaw-Gateway (Whisper-Ersatz)
-
-Erst nachdem 0.2.2 läuft und stabil ist - eigene Ressourcen (lokales
-Whisper) bleiben bis dahin der einzige Transkriptionsweg. Recherchegrundlage:
-[`Gateway-Transcription.md`](Gateway-Transcription.md) (`talk.session.create`
-mit `mode: transcription`, `transport: gateway-relay`, `brain: none`,
-gefolgt von `talk.session.appendAudio` und `talk.session.close`). Das
-Dokument ist ausdrücklich als Recherche-/Diagnosegrundlage markiert, keine
-verifizierte Spezifikation - jede konkrete Payload-Form, Auth und das
-tatsächliche Audioformat müssen gegen die installierte OpenClaw-Version
-geprüft werden, bevor sie fest verdrahtet werden.
-
-- Neuer Konfig-Schalter orthogonal zu `transport`, z. B.
-  `audio_pipeline = "local"` (Default, unverändert) oder `"gateway"` -
-  setzt `transport = "websocket"` voraus, sonst Abbruch beim Start.
-- Ersetzt bei `audio_pipeline = "gateway"` den `ffmpeg`+`whisper-cli`-Pfad:
-  Audio wird als PCM16/24kHz-Chunks über die WebSocket-Session gestreamt
-  statt lokal transkribiert.
-- Offene Frage, die dieser Schritt selbst klären muss: Übernimmt die
-  Gateway-Session das Ende-der-Sprache-Erkennung (Turn-Ende), oder bleibt
-  die lokale VAD (`vad.rs`) weiterhin dafür zuständig und steuert nur,
-  wann `appendAudio` aufhört? Das entscheidet, ob `vad.rs` in diesem Pfad
-  unverändert weiterläuft oder nur noch als Chunking-Trigger dient.
-- `audio_pipeline = "local"` bleibt vollwertiger Pfad, keine Abkündigung
-  von Whisper.
-
 ### 0.2.6 - Sprachausgabe über das OpenClaw-Gateway (Piper-Ersatz)
 
 Eigene Recherche nötig, bevor das begonnen wird: `Gateway-Transcription.md`
