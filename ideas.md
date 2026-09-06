@@ -44,6 +44,13 @@ veröffentlichte Punkte stehen nicht mehr hier, sondern in
   wählt in der Config nur noch den Modellnamen, ohne das Modell selbst
   besorgen zu müssen. Offen: welche 5, Lizenzfragen der openWakeWord-Modelle,
   wie stark das den Release-Build/das ZIP aufbläht.
+- Feldtest nach 0.2.4 (Dauerbetrieb, echtes Mikrofon): Das erste Wort nach
+  dem Aufnahme-Ton wird manchmal abgeschnitten, mit
+  `audio.mic_open_delay_ms = 100` (aktueller Testwert, Default ist 200).
+  Naheliegender erster Versuch: den Wert wieder anheben (z. B. 300-400ms)
+  und erneut testen, bevor an der Aufnahmelogik selbst etwas geändert
+  wird - reine Config-Änderung, kein Code-Fix nötig, aber noch nicht
+  gegengetestet.
 
 ## Android Applikation für remote Verbindungen vom Handy
 - Eigene Release Datei für Android getrennt vom eigentlichen macos release. Durch die implementierung der websocket verbindung sollte jede version und jedes zielsystem im modus websocket 
