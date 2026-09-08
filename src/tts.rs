@@ -67,12 +67,19 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
         bail!("Piper fehlgeschlagen: {stderr}");
     }
 
-    let play_result = play_wav(cfg, &out_wav).await;
+    let play_result = play_audio_file(cfg, &out_wav).await;
     let _ = tokio::fs::remove_file(&out_wav).await;
     play_result
 }
 
-async fn play_wav(cfg: &TtsConfig, path: &Path) -> Result<()> {
+/// Spielt eine bereits fertig synthetisierte Audiodatei ab - `afplay`
+/// (Standard) erkennt das Format anhand des Dateiinhalts, nicht nur der
+/// Endung, und spielt WAV/MP3/AAC/Opus etc. gleichermaßen. Wird sowohl vom
+/// lokalen Piper-Pfad oben als auch von
+/// `gateway_client::synthesize_via_gateway` (`audio_pipeline = "gateway"`)
+/// genutzt - eine fertige Audiodatei abzuspielen ist unabhängig davon, wo
+/// sie herkam.
+pub(crate) async fn play_audio_file(cfg: &TtsConfig, path: &Path) -> Result<()> {
     info!(?path, "Spiele Antwort über Standardausgabegerät ab");
     let mut cmd = Command::new(&cfg.player_binary);
     cmd.arg(path)

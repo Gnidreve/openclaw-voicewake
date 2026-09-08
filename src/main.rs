@@ -446,12 +446,7 @@ async fn run_round(
     // SPEAKING laufen - siehe Kommentar bei der analogen Prüfung vor dem
     // Wake-Word-Lauschen weiter oben.
     sm.require(State::Speaking)?;
-    if let Err(e) = cancellable(
-        shutdown,
-        tts::synthesize_and_play(&cfg.tts, &response, tmp_dir),
-    )
-    .await
-    {
+    if let Err(e) = speak_response(cfg, shutdown, &response, tmp_dir).await {
         transcript_log::log_output(&cfg.transcription_log, transcript_log::OutputOutcome::Error)
             .await;
         return Err(e);
@@ -463,6 +458,40 @@ async fn run_round(
     .await;
 
     Ok(RoundOutcome::Answered)
+}
+
+/// Spricht `response` über den konfigurierten Audio-Pfad - dasselbe
+/// `audio_pipeline`-Feld wie bei `transcribe_recording`, nur für die
+/// Ausgaberichtung (ROADMAP.md: "derselbe `audio_pipeline = \"gateway\"`-
+/// Schalter"). `audio_pipeline = "local"` entspricht unverändert dem
+/// bisherigen Piper-Aufruf. `audio_pipeline = "gateway"` ersetzt das durch
+/// `tts.speak` (siehe `gateway_client::synthesize_via_gateway`) - anders als
+/// bei der Transkription ist das dort zurückgelieferte Audioformat nicht
+/// fest vorgegeben (abhängig vom serverseitig konfigurierten TTS-Provider),
+/// `tts::play_audio_file` spielt es trotzdem unverändert ab, da `afplay`
+/// das Format am Dateiinhalt erkennt, nicht an der Endung.
+async fn speak_response(
+    cfg: &Config,
+    shutdown: &AtomicBool,
+    response: &str,
+    tmp_dir: &Path,
+) -> Result<()> {
+    match cfg.openclaw.audio_pipeline {
+        config::AudioPipeline::Local => {
+            cancellable(
+                shutdown,
+                tts::synthesize_and_play(&cfg.tts, response, tmp_dir),
+            )
+            .await
+        }
+        config::AudioPipeline::Gateway => {
+            cancellable(
+                shutdown,
+                gateway_client::synthesize_via_gateway(cfg, response, tmp_dir),
+            )
+            .await
+        }
+    }
 }
 
 /// Transkribiert `raw_wav` über den konfigurierten Audio-Pfad. Beide Wege

@@ -102,7 +102,7 @@ sind.
 | `transcribe.rs` | ffmpeg-Normalisierung (16kHz PCM für whisper-cli, G.711 mu-law/8kHz für die Gateway-Transkription), whisper-cli |
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
 | `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
-| `tts.rs` | Piper-Aufruf, Wiedergabe |
+| `tts.rs` | Piper-Aufruf, Wiedergabe (`play_audio_file` auch für Gateway-TTS-Audio genutzt) |
 | `template.rs` | Platzhalter-Ersetzung in Argumentlisten (ein Durchlauf, nicht verkettet) |
 | `sound.rs` | Bestätigungs- und Fehlerton |
 | `instance_lock.rs` | Einzelinstanz-Sperre |
@@ -110,7 +110,7 @@ sind.
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 | `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
-| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`), `talk.session.*` für die Gateway-Transkription (`audio_pipeline = "gateway"`) |
+| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`), `talk.session.*` für die Gateway-Transkription und `tts.speak` für die Gateway-Sprachausgabe (`audio_pipeline = "gateway"`) |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
@@ -343,6 +343,22 @@ verwirft alle Nicht-`res`-Frames stillschweigend - für Talk deshalb die
 eigene `await_talk_response_collecting_events`, die `talk.event`s
 währenddessen in den `TalkTranscriptCollector` einsammelt, statt sie zu
 überspringen.
+
+**Für die Gateway-Sprachausgabe `tts.speak` nutzen, nicht `talk.speak` oder
+`talk.client.create`.** Alle drei klingen nach Kandidaten für "Text zu
+Audio über das Gateway", sind es aber nicht gleichermaßen:
+`talk.client.create` ist client-owned und lehnt `transport = "gateway-relay"`
+explizit ab (`talk.client.create is client-owned; use talk.session.create
+for gateway-relay`) - für eine reine RPC-Verbindung wie unsere ungeeignet.
+`talk.speak` existiert, pinnt aber den separaten "Talk-Mode"-Provider und
+braucht den eigenen `operator.talk`-Scope, den wir nicht anfordern.
+`tts.speak` dagegen ist genau der einfache Fall: `{text}` rein, einmalige
+Antwort mit `audioBase64` raus, kein Session-Lifecycle, keine Events,
+braucht nur `operator.write` (bereits Teil von `REQUESTED_SCOPES`). Das
+Audioformat ist dabei NICHT wie bei der Transkription fest vorgegeben -
+`fileExtension`/`outputFormat` aus der Antwort hängen vom serverseitig
+konfigurierten TTS-Provider ab; `synthesize_via_gateway` fällt auf `mp3`
+zurück, wenn `fileExtension` fehlt.
 
 ## Konfiguration
 

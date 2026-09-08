@@ -334,14 +334,16 @@ openclaw-voicebridge --config config.toml --probe-gateway
 es ist ein Diagnose-Werkzeug für Verbindung/Kopplung, keine Möglichkeit,
 eine echte Nachricht ohne die volle Sprachpipeline abzuschicken.
 
-## Transkription über das Gateway (`audio_pipeline = "gateway"`)
+## Transkription & Sprachausgabe über das Gateway (`audio_pipeline = "gateway"`)
 
-Alternative zu ffmpeg + whisper-cli: `openclaw.audio_pipeline = "gateway"`
-lässt das OpenClaw-Gateway transkribieren, statt lokal Whisper aufzurufen.
-Beide Wege werden dauerhaft unterstützt, `"local"` bleibt Standard und
-vollwertiger Weg - keine Abkündigung. Setzt `transport = "websocket"`
-voraus (eigene, unabhängige Gateway-Verbindung für die Transkription,
-getrennt von der `chat.send`-Verbindung für die Antwort):
+Alternative zu ffmpeg + whisper-cli + Piper: `openclaw.audio_pipeline =
+"gateway"` lässt das OpenClaw-Gateway sowohl transkribieren als auch die
+Antwort synthetisieren, statt beides lokal zu machen - ein Schalter für
+beide Richtungen. Beide Wege werden dauerhaft unterstützt, `"local"`
+bleibt Standard und vollwertiger Weg - keine Abkündigung. Setzt `transport
+= "websocket"` voraus (eigene, unabhängige Gateway-Verbindungen für
+Transkription/Sprachausgabe, getrennt von der `chat.send`-Verbindung für
+den Antworttext):
 
 ```toml
 [openclaw]
@@ -351,12 +353,12 @@ gateway_host = "127.0.0.1"
 gateway_port = 18789
 ```
 
-Ablauf: `talk.session.create` (`mode = "transcription"`, `transport =
-"gateway-relay"`, `brain = "none"`) -> die Aufnahme wird zu G.711
-mu-law/8kHz/mono konvertiert und in Chunks per `talk.session.appendAudio`
-gestreamt -> `talk.session.close` -> das Transkript kommt über
-`talk.event`-Nachrichten zurück, die die Bridge zum vollständigen Text
-zusammensetzt.
+**Transkription:** `talk.session.create` (`mode = "transcription"`,
+`transport = "gateway-relay"`, `brain = "none"`) -> die Aufnahme wird zu
+G.711 mu-law/8kHz/mono konvertiert und in Chunks per
+`talk.session.appendAudio` gestreamt -> `talk.session.close` -> das
+Transkript kommt über `talk.event`-Nachrichten zurück, die die Bridge zum
+vollständigen Text zusammensetzt.
 
 **Audioqualität beachten:** Die Gateway-Talk-Session erwartet fest G.711
 mu-law bei 8kHz (Telefonqualität) - das ist eine vom Gateway-Quellcode
@@ -364,6 +366,15 @@ vorgegebene, nicht verhandelbare Anforderung für diesen Pfad, keine freie
 Konfiguration. Das ist spürbar geringer aufgelöst als die 16kHz, mit denen
 `audio_pipeline = "local"` an whisper-cli übergibt. Wer auf
 Transkriptionsqualität angewiesen ist, bleibt bei `"local"`.
+
+**Sprachausgabe:** ein einzelner `tts.speak`-Aufruf (`{text}`) liefert die
+fertig synthetisierte Antwort direkt als Base64 zurück - anders als bei
+der Transkription kein Session-Lifecycle, keine Events, kein fest
+vorgegebenes Audioformat (abhängig vom serverseitig konfigurierten
+TTS-Provider, z. B. MP3). `tts.player_binary` (Standard `afplay`) spielt
+das Ergebnis unverändert ab; `tts.binary`/`tts.args`/`tts.voice` (der
+lokale Piper-Aufruf) werden bei `audio_pipeline = "gateway"` gar nicht
+mehr verwendet.
 
 ## CLI-Adapter-Verträge
 

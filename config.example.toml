@@ -146,12 +146,15 @@ gateway_port = 18789
 # läuft. Ein gültiges Token reicht allein NICHT für vollen Zugriff - siehe
 # den Hinweis zur Geräte-Kopplung unten.
 # gateway_token = "das-gemeinsame-gateway-token"
-# "local" (Standard, ffmpeg + whisper-cli) oder "gateway" (Transkription
-# über eine OpenClaw-Gateway-Talk-Session statt lokal) - beide werden
-# dauerhaft unterstützt, keiner ist nur ein Fallback für den anderen.
-# Setzt transport = "websocket" voraus (eigene Verbindung, unabhängig vom
-# chat.send-Pfad). Achtung Audioqualität: die Gateway-Session erwartet fest
-# G.711 mu-law/8kHz (Telefonqualität), nicht das 16kHz von whisper-cli.
+# "local" (Standard, ffmpeg + whisper-cli + Piper) oder "gateway"
+# (Transkription UND Sprachausgabe über das OpenClaw-Gateway statt lokal -
+# ein Schalter für beide Richtungen) - beide werden dauerhaft unterstützt,
+# keiner ist nur ein Fallback für den anderen. Setzt transport = "websocket"
+# voraus (eigene Verbindungen, unabhängig vom chat.send-Pfad). Achtung
+# Audioqualität bei der Transkription: die Gateway-Session erwartet fest
+# G.711 mu-law/8kHz (Telefonqualität), nicht das 16kHz von whisper-cli. Die
+# Sprachausgabe nutzt dagegen das Format des serverseitig konfigurierten
+# TTS-Providers (z. B. MP3) - nicht fest vorgegeben.
 audio_pipeline = "local"
 
 # Beispiel für das echte OpenClaw-CLI mit eigener Voice-Session:

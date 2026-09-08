@@ -35,21 +35,6 @@ Unit-Tests in der Datei, ein Mock-Gateway-Feature-Test in `tests/` analog
 zu `tests/pipeline_with_stubs.rs`) - nicht erst gesammelt danach in 0.3.x.
 0.3.x ist für die große strukturelle Aufräumung reserviert, siehe dort.
 
-### 0.2.7 - Sprachausgabe über das OpenClaw-Gateway (Piper-Ersatz)
-
-Eigene Recherche nötig, bevor das begonnen wird: `Gateway-Transcription.md`
-deckt ausschließlich die Transkriptionsrichtung ab (Audio rein), nicht die
-Synthese-Richtung (Text/Antwort raus als Audio) - das Dokument selbst
-benennt das in Abschnitt 42 als separat zu untersuchende zweite Phase.
-Vermutlich relevant, aber nicht verifiziert: der `stt-tts`/`managed-room`-
-Pfad bzw. `talk.client.create` statt `talk.session.create`.
-
-- Setzt 0.2.5 voraus (derselbe `audio_pipeline = "gateway"`-Schalter),
-  ersetzt bei Aktivierung den lokalen Piper-Aufruf durch vom Gateway
-  synthetisiertes Audio.
-- `audio_pipeline = "local"` bleibt vollwertiger Pfad, keine Abkündigung
-  von Piper.
-
 ## 0.3.x - Testing & Projektstruktur
 
 Bewusst erst nach dem **kompletten** 0.2.x-Block (inklusive der

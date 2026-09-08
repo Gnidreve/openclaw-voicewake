@@ -1,22 +1,29 @@
-//! Integrationstest für `audio_pipeline = "gateway"` (0.2.5, "Transkription
-//! über das OpenClaw-Gateway") gegen ein selbstgebautes Mock-Gateway - das
-//! WebSocket-Pendant zu `tests/pipeline_with_stubs.rs`, diesmal für die
-//! Transkriptionsseite statt (nur) die Antwortseite.
+//! Integrationstest für `audio_pipeline = "gateway"` (0.2.5 Transkription +
+//! 0.2.7 Sprachausgabe über das OpenClaw-Gateway) gegen ein selbstgebautes
+//! Mock-Gateway - das WebSocket-Pendant zu `tests/pipeline_with_stubs.rs`,
+//! diesmal für beide Enden der Runde statt nur die Antwortseite.
 //!
 //! `audio_pipeline = "gateway"` setzt `transport = "websocket"` voraus
-//! (siehe `Config::validate`), deshalb laufen in einer Runde zwei komplett
-//! getrennte Gateway-Verbindungen nacheinander auf: eine für
-//! `talk.session.create` -> `appendAudio` -> `close` (Transkription), eine
-//! für `chat.send` (Antwort) - `transcribe_via_gateway` und
-//! `send_chat_message` verbinden sich beide unabhängig neu (siehe
-//! `gateway_client.rs`). Das Mock-Gateway hier nimmt deshalb zwei
+//! (siehe `Config::validate`) und ersetzt sowohl die Transkription als auch
+//! die Sprachausgabe - eine Runde öffnet deshalb drei komplett getrennte
+//! Gateway-Verbindungen nacheinander: eine für `talk.session.create` ->
+//! `appendAudio` -> `close` (Transkription), eine für `chat.send`
+//! (Antworttext), eine für `tts.speak` (Antwort synthetisieren).
+//! `transcribe_via_gateway`, `send_chat_message` und
+//! `synthesize_via_gateway` verbinden sich alle unabhängig neu (siehe
+//! `gateway_client.rs`). Das Mock-Gateway hier nimmt deshalb drei
 //! Verbindungen nacheinander an und behandelt sie nach der zuerst
 //! empfangenen Methode.
 //!
 //! ffmpeg wird durch einen Stub ersetzt, der unabhängig vom echten
 //! Audioinhalt einen festen Byte-String schreibt - der Test prüft, dass
 //! genau diese (base64-kodierten) Bytes unverändert bei
-//! `talk.session.appendAudio` ankommen.
+//! `talk.session.appendAudio` ankommen. Der Player-Stub (`afplay`-Ersatz)
+//! schreibt umgekehrt mit, welchen Dateiinhalt er abgespielt bekommen hat -
+//! damit lässt sich prüfen, dass genau das von `tts.speak` gelieferte
+//! (base64-dekodierte) Audio unverändert bei der Wiedergabe ankommt. Piper
+//! selbst wird bei `audio_pipeline = "gateway"` gar nicht mehr aufgerufen,
+//! deshalb gibt es hier keinen Piper-Stub.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -62,29 +69,9 @@ done
 printf 'FAKE-MULAW-AUDIO-BYTES' > "$out"
 "#;
 
-const PLAYER_STUB: &str = "#!/bin/sh\nexit 0\n";
-
-const VENV_PYTHON_STUB: &str = r#"#!/bin/sh
-set -eu
-[ "$1" = "-m" ] || { echo "erwartet -m als erstes Argument, bekam: $1" >&2; exit 3; }
-[ "$2" = "piper" ] || { echo "erwartet Modul piper, bekam: $2" >&2; exit 3; }
-shift 2
-out=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -m) shift 2 ;;
-    -f) out="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-[ -n "$out" ] || { echo "kein -f Ausgabepfad" >&2; exit 3; }
-cat > /dev/null
-: > "$out"
-"#;
-
 #[cfg(unix)]
 #[tokio::test]
-async fn gateway_audio_pipeline_transcribes_via_talk_session_then_sends_via_chat_send() {
+async fn gateway_audio_pipeline_transcribes_and_speaks_entirely_via_the_gateway() {
     let result = tokio::time::timeout(Duration::from_secs(20), run_test()).await;
     result.expect("Test ist hängen geblieben - vermutlich ein Deadlock im talk.session-Ablauf");
 }
@@ -98,8 +85,23 @@ async fn run_test() {
     std::fs::create_dir_all(&bin_dir).expect("Testverzeichnis anlegen");
 
     let ffmpeg = write_stub(&bin_dir, "ffmpeg-stub", FFMPEG_MULAW_STUB);
-    let player = write_stub(&bin_dir, "player-stub", PLAYER_STUB);
-    let venv_python = write_stub(&bin_dir, "venv-python-stub", VENV_PYTHON_STUB);
+
+    // Schreibt mit, welche Datei mit welchem Inhalt "abgespielt" wurde -
+    // damit lässt sich prüfen, dass genau das von tts.speak gelieferte
+    // (base64-dekodierte) Audio unverändert bei der Wiedergabe ankommt.
+    let played_log = dir.join("played.log");
+    let player = write_stub(
+        &bin_dir,
+        "player-stub",
+        &format!(
+            r#"#!/bin/sh
+set -eu
+cat "$1" >> "{played_log}"
+exit 0
+"#,
+            played_log = played_log.display(),
+        ),
+    );
 
     let sample = dir.join("sample.wav");
     std::fs::write(&sample, b"RIFF").expect("Beispieldatei schreiben");
@@ -131,9 +133,6 @@ gateway_host = "127.0.0.1"
 gateway_port = {port}
 
 [tts]
-binary = "{venv_python}"
-voice = "de_DE-thorsten-high"
-args = ["-m", "piper", "-m", "{{voice}}", "-f", "{{output}}"]
 player_binary = "{player}"
 
 [sound]
@@ -146,7 +145,6 @@ temp_dir = "{tmp}"
 [transcription_log]
 path = "{chat_log}"
 "#,
-            venv_python = venv_python.display(),
             player = player.display(),
             ffmpeg = ffmpeg.display(),
             tmp = dir.display(),
@@ -186,6 +184,7 @@ path = "{chat_log}"
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let log = std::fs::read_to_string(&chat_log).unwrap_or_default();
+    let played = std::fs::read_to_string(&played_log).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
 
     // Das Transkript kommt hier aus dem Mock-Gateway (`talk.event`), nicht
@@ -199,11 +198,19 @@ path = "{chat_log}"
         log.contains(&format!(r#"[Output] "{expected_final_response}""#)),
         "aus deltaText zusammengesetzte Antwort fehlt im Log.\nLog:\n{log}\nstderr:\n{stderr}"
     );
+    // Bestätigt, dass tts.speak tatsächlich aufgerufen und sein Audio
+    // unverändert an die Wiedergabe weitergereicht wurde - kein lokaler
+    // Piper-Aufruf mehr bei audio_pipeline = "gateway".
+    assert_eq!(
+        played, "FAKE-TTS-AUDIO-BYTES",
+        "das von tts.speak gelieferte Audio wurde nicht unverändert abgespielt.\nstderr:\n{stderr}"
+    );
 }
 
-/// Nimmt zwei Verbindungen nacheinander an: die erste für die
-/// Talk-Transkriptionssession, die zweite für `chat.send` - siehe
-/// Modul-Doku oben, warum es zwei getrennte Verbindungen sind.
+/// Nimmt drei Verbindungen nacheinander an: die erste für die
+/// Talk-Transkriptionssession, die zweite für `chat.send`, die dritte für
+/// `tts.speak` - siehe Modul-Doku oben, warum es getrennte Verbindungen
+/// sind.
 async fn run_mock_gateway(
     listener: TcpListener,
     expected_target_channel: String,
@@ -211,6 +218,7 @@ async fn run_mock_gateway(
 ) -> Result<(), String> {
     handle_talk_transcription_connection(&listener).await?;
     handle_chat_send_connection(&listener, &expected_target_channel, &final_response).await?;
+    handle_tts_speak_connection(&listener, &final_response).await?;
     Ok(())
 }
 
@@ -436,6 +444,44 @@ async fn handle_chat_send_connection(
         },
     });
     send(&mut ws, &final_event).await?;
+
+    let _ = ws.close(None).await;
+    Ok(())
+}
+
+/// `tts.speak` ist anders als `talk.session.*`/`chat.send` ein einfacher
+/// synchroner Request/Response-Aufruf ohne Session/Events - eine Antwort
+/// genügt.
+async fn handle_tts_speak_connection(
+    listener: &TcpListener,
+    expected_text: &str,
+) -> Result<(), String> {
+    let mut ws = accept_and_handshake(listener).await?;
+
+    let speak_req = recv_json(&mut ws).await?;
+    if speak_req["method"] != "tts.speak" {
+        return Err(format!("erwartet method=tts.speak, bekam {speak_req:?}"));
+    }
+    if speak_req["params"]["text"] != expected_text {
+        return Err(format!(
+            "falscher Text bei tts.speak: {:?}",
+            speak_req["params"]["text"]
+        ));
+    }
+
+    use base64::Engine;
+    let audio_base64 = base64::engine::general_purpose::STANDARD.encode(b"FAKE-TTS-AUDIO-BYTES");
+    let speak_ok = serde_json::json!({
+        "type": "res",
+        "id": speak_req["id"],
+        "ok": true,
+        "payload": {
+            "audioBase64": audio_base64,
+            "provider": "test",
+            "fileExtension": ".mp3",
+        },
+    });
+    send(&mut ws, &speak_ok).await?;
 
     let _ = ws.close(None).await;
     Ok(())
