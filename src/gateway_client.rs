@@ -47,7 +47,6 @@ use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
-use std::future::Future;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{timeout, Duration};
@@ -529,17 +528,13 @@ fn handle_chat_event(
 ///
 /// `chat.send` ist laut Protokoll non-blocking: die Antwort auf den Request
 /// selbst ist nur ein sofortiges ACK (`status: "started"`), die eigentliche
-/// Antwort kommt über `chat`-Events auf dem zuvor abonnierten Kanal. Sobald
-/// das ACK da ist, wird `on_ack` aufgerufen (typischerweise, um sofort eine
-/// gesprochene Zwischenmeldung auszulösen, siehe
-/// `OpenClawConfig::interim_message`) - erst danach wird auf die Events
-/// gewartet, damit ein Fehlschlagen von `on_ack` selbst nicht den Empfang
-/// der eigentlichen Antwort verzögert.
-pub async fn send_chat_message<F, Fut>(cfg: &Config, message: &str, on_ack: F) -> Result<String>
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = ()>,
-{
+/// Antwort kommt über `chat`-Events auf dem zuvor abonnierten Kanal. Die
+/// Bridge bleibt bis dahin einfach still - dieselbe Wartezeit, die auch der
+/// synchrone CLI-Aufruf hätte, nur ohne Zwischenmeldung (0.2.2 hatte hier
+/// versuchsweise ein ACK-getriggertes "Ich schau mir das an", das sich im
+/// Feldtest als unerwünscht herausstellte und in 0.2.6 wieder entfernt
+/// wurde, siehe CHANGELOG.md).
+pub async fn send_chat_message(cfg: &Config, message: &str) -> Result<String> {
     let mut ws = connect_and_handshake(cfg).await?;
     let timeout_secs = cfg.openclaw.timeout_secs;
     subscribe_channel(&mut ws, &cfg.openclaw.target_channel, timeout_secs).await?;
@@ -571,8 +566,6 @@ where
         );
     }
     info!(run_id = %idempotency_key, "chat.send bestätigt (ACK) - warte auf gestreamte Antwort");
-
-    on_ack().await;
 
     let mut collector = ChatTextCollector::default();
     loop {
