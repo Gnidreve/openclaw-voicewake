@@ -188,9 +188,9 @@ impl Default for WhisperConfig {
 }
 
 /// Wie das Transkript an OpenClaw übergeben wird. `Cli` bleibt der
-/// vollwertige Legacy-Pfad (siehe `openclaw.rs`), `Websocket` spricht direkt
-/// mit dem Gateway (siehe `gateway_client.rs`) - beide werden dauerhaft
-/// unterstützt, keiner ist ein reiner Fallback für den anderen.
+/// vollwertige Legacy-Pfad (siehe `openclaw::cli`), `Websocket` spricht
+/// direkt mit dem Gateway (siehe `openclaw::websocket`) - beide werden
+/// dauerhaft unterstützt, keiner ist ein reiner Fallback für den anderen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
@@ -200,9 +200,9 @@ pub enum Transport {
 }
 
 /// Woher die Transkription kommt. `Local` bleibt der vollwertige Legacy-Pfad
-/// (ffmpeg-Normalisierung + `whisper-cli`, siehe `transcribe.rs`), `Gateway`
-/// ersetzt das durch eine OpenClaw-Gateway-Talk-Session (siehe
-/// `gateway_client::transcribe_via_gateway`) - beide werden dauerhaft
+/// (ffmpeg-Normalisierung + `whisper-cli`, siehe `transcribe::local`),
+/// `Gateway` ersetzt das durch eine OpenClaw-Gateway-Talk-Session (siehe
+/// `transcribe::gateway::transcribe_via_gateway`) - beide werden dauerhaft
 /// unterstützt. Orthogonal zu `Transport`, aber `Gateway` setzt
 /// `transport = "websocket"` voraus (siehe `Config::validate`), da die
 /// Talk-Session dieselbe Gateway-Verbindung braucht.
@@ -503,16 +503,16 @@ impl Config {
             .tts
             .args
             .iter()
-            .any(|arg| arg.contains(crate::tts::OUTPUT_PLACEHOLDER))
+            .any(|arg| arg.contains(crate::tts::local::OUTPUT_PLACEHOLDER))
         {
             anyhow::bail!(
                 "tts.args enthält keinen {} -Platzhalter. Ohne ihn weiß Piper nicht, \
                  wohin die Sprachausgabe geschrieben werden soll.",
-                crate::tts::OUTPUT_PLACEHOLDER
+                crate::tts::local::OUTPUT_PLACEHOLDER
             );
         }
         // Bei `audio_pipeline = "gateway"` läuft die Transkription über das
-        // Gateway (siehe `gateway_client::transcribe_via_gateway`) - ein
+        // Gateway (siehe `transcribe::gateway::transcribe_via_gateway`) - ein
         // lokales Whisper-Modell wird dann nicht mehr gebraucht und muss
         // deshalb auch nicht vorhanden sein.
         if !dry_run

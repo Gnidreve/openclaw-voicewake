@@ -59,10 +59,10 @@ Regressionstests über den kompletten neuen Pfad.)
 
 | Version | Thema |
 |---|---|
-| 0.3.0 | `src/`-Modulstruktur nach dem kompletten 0.2.x-Block neu ordnen: `openclaw.rs` wird zu einem Modul mit CLI- und WebSocket-Transport (z. B. `src/openclaw/{mod,cli,websocket}.rs`); je nachdem, wie 0.2.5/0.2.7 tatsächlich geschnitten wurden, betrifft das ggf. auch `audio.rs`/`transcribe.rs`/`tts.rs` (lokaler vs. Gateway-Pfad). Exakter Zuschnitt entscheidet sich an der tatsächlichen Größe und Form der 0.2.x-Module, nicht vorab festlegen. |
 | 0.3.1 | `tests/`-Struktur vor den neuen Regressionstests festlegen: gemeinsame Test-Helfer (Stub-/Mock-Erzeugung wie in `tests/pipeline_with_stubs.rs`) in ein wiederverwendbares Modul auslagern, statt sie in jedem künftigen Feature-Test erneut zu duplizieren |
-| 0.3.2 | Unit-Tests für das Ergebnis der `src/`-Restrukturierung (0.3.0) nachziehen, wo sich durch das Verschieben Lücken ergeben - die fachliche Logik selbst ist bereits aus den 0.2.x-Schritten getestet |
-| 0.3.3 | System-Level-Regressionstest in `tests/` für den kompletten Pfad über alle in 0.2.x aktivierbaren Kombinationen (`transport` x `audio_pipeline`) hinweg, gegen ein Mock-Gateway statt echtem OpenClaw (analog zu `tests/pipeline_with_stubs.rs`) |
+| 0.3.2 | Wake-Word-Schwellwert-Härtung (dazwischengeschoben, kein Testing/Struktur-Thema): Feldtest-Datenpunkte aus `ideas.md` - echte Treffer bei Scores 0.50-0.98, Grundrauschen bei ~0.20, `--threshold 0.5` aktueller Arbeitswert; gelegentliche Fehltrigger bei Husten/"A"-Anlaut-Wörtern (Wake-Word "Alexa"), aktuell ungefährlich da die VAD sie vor OpenClaw/Gateway abfängt. Schwellwert lebt im externen Wake-Word-Listener, nicht in dieser Binary - Umfang hier: klären, ob `wakeword.rs`/das CLI-Adapter-Protokoll die Confidence-Scores des Listeners durchreichen/mitloggen soll, um den Wert pro Raum/Mikrofon einstellbar zu machen, plus ggf. Anpassung des dokumentierten Erfahrungswerts in README/`config.example.toml` |
+| 0.3.3 | Unit-Tests für das Ergebnis der `src/`-Restrukturierung (0.3.0) nachziehen, wo sich durch das Verschieben Lücken ergeben - die fachliche Logik selbst ist bereits aus den 0.2.x-Schritten getestet |
+| 0.3.4 | System-Level-Regressionstest in `tests/` für den kompletten Pfad über alle in 0.2.x aktivierbaren Kombinationen (`transport` x `audio_pipeline`) hinweg, gegen ein Mock-Gateway statt echtem OpenClaw (analog zu `tests/pipeline_with_stubs.rs`) |
 
 ## 0.4.x - Packaging als Hintergrunddienst
 

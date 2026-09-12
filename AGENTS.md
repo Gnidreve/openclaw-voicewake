@@ -84,8 +84,8 @@ geöffneten Terminal-Fenster** (nicht per Automation/AppleScript
 gestartet - das kann auf macOS die TCC-Berechtigungskette brechen, siehe
 Invariante weiter unten) und berichtet Log-Ausschnitte/Beobachtungen
 zurück. Wer an diesem Projekt ohne Zugriff auf echte macOS-Hardware
-arbeitet, sollte Änderungen an `audio.rs`/`wakeword.rs`/`transcribe.rs`/
-`tts.rs`/`child_process.rs` explizit als "auf echter Hardware noch nicht
+arbeitet, sollte Änderungen an `audio.rs`/`wakeword.rs`/`transcribe/`/
+`tts/`/`child_process.rs` explizit als "auf echter Hardware noch nicht
 verifiziert" kennzeichnen (PR-Beschreibung, Commit-Nachricht) statt
 stillschweigend als fertig zu behandeln, nur weil die Stub-Tests grün
 sind.
@@ -99,10 +99,14 @@ sind.
 | `audio.rs` | CoreAudio-Aufnahme, WAV schreiben |
 | `vad.rs` | Stille-/Sprach-Erkennung (reine Logik, gut testbar) |
 | `wakeword.rs` | Wake-Word-Prozess starten, auf Trigger-Zeile warten |
-| `transcribe.rs` | ffmpeg-Normalisierung (16kHz PCM für whisper-cli, G.711 mu-law/8kHz für die Gateway-Transkription), whisper-cli |
+| `transcribe/local.rs` | ffmpeg-Normalisierung (16kHz PCM für whisper-cli), whisper-cli, plus `convert_to_gateway_mulaw` (G.711 mu-law/8kHz - von `transcribe::gateway` genutzt) |
+| `transcribe/gateway.rs` | `talk.session.*` für die Gateway-Transkription (`audio_pipeline = "gateway"`) |
 | `transcript_filter.rs` | Halluzinationsfilter (letztes Netz) |
-| `openclaw.rs` | Argumente, Umschlag, Antwort-Extraktion |
-| `tts.rs` | Piper-Aufruf, Wiedergabe (`play_audio_file` auch für Gateway-TTS-Audio genutzt) |
+| `openclaw/mod.rs` | transportunabhängig: Umschlag (`render_message`), Session-Reset-Entscheidung (`reset_due`) |
+| `openclaw/cli.rs` | `transport = "cli"`: Argumente, Subprozess-Aufruf, Antwort-Extraktion |
+| `openclaw/websocket.rs` | `transport = "websocket"`: `chat.send` mit gestreamter `deltaText`-Sammlung, `--probe-gateway` |
+| `tts/local.rs` | Piper-Aufruf, plus `play_audio_file` (Wiedergabe - von `tts::gateway` mitgenutzt) |
+| `tts/gateway.rs` | `tts.speak` für die Gateway-Sprachausgabe (`audio_pipeline = "gateway"`) |
 | `template.rs` | Platzhalter-Ersetzung in Argumentlisten (ein Durchlauf, nicht verkettet) |
 | `sound.rs` | Bestätigungs- und Fehlerton |
 | `instance_lock.rs` | Einzelinstanz-Sperre |
@@ -110,10 +114,18 @@ sind.
 | `transcript_log.rs` | chat-artiges Diagnose-Log |
 | `config.rs` | Konfiguration und Startvalidierung |
 | `device_identity.rs` | Ed25519-Geräteidentität und Signaturvertrag für den Gateway-Connect-Handshake (`transport = "websocket"`) |
-| `gateway_client.rs` | Gateway-WebSocket-Client: Connect-Handshake, `sessions.messages.subscribe`, `chat.send` mit gestreamter `deltaText`-Sammlung (`transport = "websocket"`), `talk.session.*` für die Gateway-Transkription und `tts.speak` für die Gateway-Sprachausgabe (`audio_pipeline = "gateway"`) |
+| `gateway.rs` | Gemeinsame Low-Level-WebSocket-Verbindung zum Gateway: Connect-Handshake, `sessions.messages.subscribe`, Frame-IO - Basis für `openclaw::websocket`, `transcribe::gateway` und `tts::gateway` |
 
 Eine Gesprächsrunde ist genau **eine** Funktion: `run_round` in `main.rs`.
 Wake-Word und Folgerunde unterscheiden sich nur darin, wer sie aufruft.
+
+Seit 0.3.0 spiegelt `src/` die beiden Config-Schalter direkt in der
+Modulstruktur: `openclaw::{cli,websocket}` folgt `transport`,
+`transcribe::{local,gateway}` und `tts::{local,gateway}` folgen
+`audio_pipeline`. Die drei `gateway`-Untermodule teilen sich die
+Low-Level-Verbindung in `gateway.rs` (Connect-Handshake, Frame-IO), bauen
+aber jeweils ihre eigene WebSocket-Verbindung auf - keine gemeinsam
+gehaltene Session zwischen ihnen.
 
 ## Invarianten
 
@@ -178,7 +190,7 @@ Tastatureingaben zu konfigurieren (`term_init` -> `tcsetattr`). In
 Kombination mit `spawn_isolated`s eigener Prozessgruppe blockiert dieser
 `tcsetattr`-Aufruf auf macOS unbegrenzt (`SIGTTOU` wird nicht regulär
 zugestellt), statt den Prozess nur zu stoppen - die Normalisierung in
-`transcribe.rs` hing dadurch nach *jeder* Runde mit tatsächlich erkannter
+`transcribe/local.rs` hing dadurch nach *jeder* Runde mit tatsächlich erkannter
 Sprache fest, bis zum Timeout. `build_ffmpeg_args` setzt `-nostdin` deshalb
 fest, nicht optional. **Kein Workaround über die Shell** (z. B. die Bridge
 mit `< /dev/null` starten) - das hat im Feldtest zusätzlich die
@@ -239,7 +251,7 @@ gleich klingenden Töne hinzufügen - das Ausbleiben eines Tons ist selbst
 ein Signal.
 
 **Jeder Kindprozess gibt seine stderr-Ausgabe bei einem Fehlschlag preis.**
-`transcribe.rs`, `openclaw.rs`, `tts.rs`, `sound.rs` fangen stderr per
+`transcribe/local.rs`, `openclaw/cli.rs`, `tts/local.rs`, `sound.rs` fangen stderr per
 `Stdio::piped()` und hängen sie in die Fehlermeldung ein. Ein Adapter, der
 stattdessen `Stdio::null()` setzt (wie früher `wakeword.rs`), verwirft die
 einzige konkrete Fehlerursache (fehlendes Modell, Traceback, Gerät belegt)
@@ -279,11 +291,11 @@ Gateway lehnt einen unbekannten `client.id`/`client.mode`-Wert schon vor der
 Geräte-Signaturprüfung mit `INVALID_REQUEST` ab; ein Test gegen das eigene
 Mock-Gateway hätte das nie gefangen, weil der Mock denselben (falschen)
 Wert einfach unkritisch akzeptiert hätte. Vor jeder Änderung an `CLIENT_ID`/
-`CLIENT_MODE` in `gateway_client.rs` deshalb `GATEWAY_CLIENT_IDS`/
+`CLIENT_MODE` in `gateway.rs` deshalb `GATEWAY_CLIENT_IDS`/
 `GATEWAY_CLIENT_MODES` im tatsächlichen OpenClaw-Quellcode gegenprüfen, nicht
 nur die Doku-Beispiele übernehmen - der Regressionstest
-`client_id_and_mode_are_in_the_gateways_closed_enums` hält den zuletzt
-geprüften Stand beider Enums fest.
+`client_id_and_mode_are_in_the_gateways_closed_enums` (`gateway.rs`) hält
+den zuletzt geprüften Stand beider Enums fest.
 
 **Ein gültiges `gateway_token` reicht für den Gateway-WebSocket-Transport
 nicht aus.** Ohne signierte Geräteidentität setzt das Gateway angeforderte
@@ -324,7 +336,7 @@ hart G.711 mu-law bei 8kHz und lehnt jede andere Provider-Konfiguration
 serverseitig ab - keine freie Wahl, keine Config-Option auf unserer
 Seite. `transcribe_via_gateway` prüft das Audioformat aus der
 `talk.session.create`-Antwort trotzdem defensiv nach (`TALK_EXPECTED_AUDIO_*`
-in `gateway_client.rs`), statt blind zu senden - ändert sich der Wert in
+in `transcribe/gateway.rs`), statt blind zu senden - ändert sich der Wert in
 einer künftigen OpenClaw-Version, soll das einen klaren Fehler geben statt
 stillschweigend falsches Audio zu schicken.
 
