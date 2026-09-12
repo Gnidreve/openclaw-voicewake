@@ -1,3 +1,8 @@
+//! `audio_pipeline = "local"` (Default, Legacy-Pfad): ffmpeg-Normalisierung
+//! und `whisper-cli`. `convert_to_gateway_mulaw` unten ist eine Ausnahme -
+//! ffmpeg bleibt auch für `audio_pipeline = "gateway"` das lokale
+//! Konvertierungswerkzeug, siehe [`super::gateway`].
+
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -67,8 +72,9 @@ pub async fn normalize_audio(
 }
 
 /// Reine Argument-Konstruktion für die G.711-mu-law-Konvertierung
-/// (`audio_pipeline = "gateway"`, siehe `gateway_client::transcribe_via_gateway`).
-/// `-f mulaw` erzeugt eine rohe, headerlose Sample-Datei (kein WAV-Container) -
+/// (`audio_pipeline = "gateway"`, siehe `transcribe::gateway::transcribe_via_gateway`,
+/// das diese Funktion für die Konvertierung vor dem Versand nutzt). `-f mulaw`
+/// erzeugt eine rohe, headerlose Sample-Datei (kein WAV-Container) -
 /// genau die Bytes, die unverändert base64-kodiert an
 /// `talk.session.appendAudio` gehen. G.711 mu-law/8kHz/mono ist keine freie
 /// Wahl, sondern eine vom Gateway fest vorgegebene, nicht verhandelbare
