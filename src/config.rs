@@ -285,12 +285,6 @@ pub struct OpenClawConfig {
     /// OpenClaw-Seite). Leer = kein Token (nur zulässig, wenn das Gateway mit
     /// `gateway.auth.mode = "none"` läuft).
     pub gateway_token: GatewayToken,
-    /// Nur relevant bei `transport = "websocket"`: wird direkt gesprochen,
-    /// sobald `chat.send` sein ACK (`status: started`) liefert - das
-    /// Pendant zum "Ich schau mir das an" aus Telegram, weil `chat.send`
-    /// selbst non-blocking ist und die eigentliche Antwort erst über
-    /// gestreamte `chat`-Events nachkommt (siehe `gateway_client.rs`).
-    pub interim_message: String,
     /// `"local"` (Standard) oder `"gateway"`. Siehe `AudioPipeline`.
     pub audio_pipeline: AudioPipeline,
 }
@@ -313,7 +307,6 @@ impl Default for OpenClawConfig {
             gateway_host: "127.0.0.1".to_string(),
             gateway_port: 18789,
             gateway_token: GatewayToken::default(),
-            interim_message: "Einen Moment, ich schaue nach.".to_string(),
             audio_pipeline: AudioPipeline::Local,
         }
     }
@@ -824,12 +817,6 @@ mod tests {
         assert_eq!(cfg.gateway_host, "127.0.0.1");
         assert_eq!(cfg.gateway_port, 18789);
         assert!(cfg.gateway_token.is_empty());
-    }
-
-    #[test]
-    fn interim_message_has_a_sensible_spoken_default() {
-        let cfg = OpenClawConfig::default();
-        assert_eq!(cfg.interim_message, "Einen Moment, ich schaue nach.");
     }
 
     #[test]

@@ -14,6 +14,24 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-08
+
+### Entfernt
+
+- Die in 0.2.2 eingeführte, ACK-getriggerte gesprochene Zwischenmeldung
+  bei `transport = "websocket"` (`openclaw.interim_message`, Standard
+  "Einen Moment, ich schaue nach.") ist wieder entfernt. Feldtest-Ergebnis:
+  unerwünscht - die als Vorbild genannte "Ich schau mir das an"-Analogie
+  aus Telegram war beim tatsächlichen Hören etwas anderes als das
+  automatische, bei *jeder* Nachricht ungefragt auslösende Verhalten, das
+  0.2.2 gebaut hatte. `send_chat_message` wartet jetzt wieder einfach
+  still auf die gestreamte Antwort, wie es der synchrone CLI-Aufruf auch
+  tut - kein Verhaltensunterschied zwischen den beiden Transporten mehr,
+  außer welcher Weg zur Antwort führt. `interim_message` ist als
+  Config-Feld komplett entfernt (nicht nur deaktiviert) - eine
+  bestehende Config mit diesem Feld bricht beim Laden
+  (`deny_unknown_fields`) und muss die Zeile streichen.
+
 ## [0.2.5] - 2026-08-31
 
 ### Hinzugefügt
@@ -555,7 +573,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.2...v0.2.3

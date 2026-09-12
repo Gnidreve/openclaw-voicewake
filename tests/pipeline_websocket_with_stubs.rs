@@ -5,13 +5,12 @@
 //!
 //! Deckt den kompletten dokumentierten `chat.send`-Ablauf ab: Handshake
 //! (wie in `tests/gateway_probe_with_mock_server.rs`) -> `chat.send` mit
-//! `sessionKey`/`idempotencyKey` -> sofortiges ACK (`status: "started"`),
-//! das laut Roadmap eine gesprochene Zwischenmeldung auslösen soll ->
+//! `sessionKey`/`idempotencyKey` -> sofortiges ACK (`status: "started"`) ->
 //! gestreamte `deltaText`-Events -> `final` beendet die Runde. Piper wird
 //! über einen Stub ersetzt, der den über stdin hereinkommenden Text
-//! mitschreibt - so lässt sich nachweisen, dass tatsächlich zuerst die
-//! Zwischenmeldung und danach die zusammengesetzte `deltaText`-Antwort
-//! gesprochen wird, nicht nur, dass irgendein Text ankam.
+//! mitschreibt - so lässt sich nachweisen, dass genau die aus `deltaText`
+//! zusammengesetzte Antwort gesprochen wird, ohne die in 0.2.6 wieder
+//! entfernte Zwischenmeldung (siehe CHANGELOG.md).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -65,7 +64,7 @@ const PLAYER_STUB: &str = "#!/bin/sh\nexit 0\n";
 
 #[cfg(unix)]
 #[tokio::test]
-async fn websocket_round_streams_deltas_after_an_ack_triggered_interim_message() {
+async fn websocket_round_streams_deltas_into_the_final_spoken_response() {
     let result = tokio::time::timeout(Duration::from_secs(20), run_test()).await;
     result.expect("Test ist hängen geblieben - vermutlich ein Deadlock im chat.send-Ablauf");
 }
@@ -81,8 +80,8 @@ async fn run_test() {
     let player = write_stub(&bin_dir, "player-stub", PLAYER_STUB);
 
     // Piper-Stub, der den über stdin hereinkommenden Text mitschreibt - so
-    // lässt sich die Reihenfolge (Zwischenmeldung vor der eigentlichen
-    // Antwort) tatsächlich nachweisen statt nur zu raten.
+    // lässt sich nachweisen, dass genau ein Aufruf mit genau der
+    // zusammengesetzten Antwort erfolgt, keine zusätzliche Zwischenmeldung.
     let spoken_log = dir.join("spoken.log");
     let venv_python = write_stub(
         &bin_dir,
@@ -121,7 +120,6 @@ printf '\n---\n' >> "{spoken_log}"
     let port = listener.local_addr().unwrap().port();
     let target_channel = "agent:main:voice-assistant";
     let expected_transcript = "Wie spaet ist es?";
-    let interim_message = "Ich schaue nach.";
 
     let server = tokio::spawn(run_mock_gateway(
         listener,
@@ -140,7 +138,6 @@ target_channel = "{target_channel}"
 transport = "websocket"
 gateway_host = "127.0.0.1"
 gateway_port = {port}
-interim_message = "{interim_message}"
 
 [whisper]
 binary = "{whisper}"
@@ -221,6 +218,10 @@ path = "{chat_log}"
         "aus deltaText zusammengesetzte Antwort fehlt im Log.\nLog:\n{log}\nstderr:\n{stderr}"
     );
 
+    // Regression: 0.2.2 hatte hier eine ACK-getriggerte Zwischenmeldung, die
+    // in 0.2.6 wieder entfernt wurde (Feldtest-Feedback: unerwünscht). Piper
+    // darf deshalb genau einmal aufgerufen werden, mit genau der finalen
+    // Antwort - nicht zweimal.
     let spoken_segments: Vec<&str> = spoken
         .split("---")
         .map(str::trim)
@@ -228,8 +229,8 @@ path = "{chat_log}"
         .collect();
     assert_eq!(
         spoken_segments,
-        vec![interim_message, "Es ist kurz nach acht."],
-        "erwartet: erst die ACK-Zwischenmeldung, dann die aus deltaText zusammengesetzte Antwort - in dieser Reihenfolge.\nGesprochen:\n{spoken}\nstderr:\n{stderr}"
+        vec!["Es ist kurz nach acht."],
+        "erwartet: genau ein Piper-Aufruf mit der finalen Antwort, keine Zwischenmeldung mehr.\nGesprochen:\n{spoken}\nstderr:\n{stderr}"
     );
 }
 

@@ -35,7 +35,7 @@ Unit-Tests in der Datei, ein Mock-Gateway-Feature-Test in `tests/` analog
 zu `tests/pipeline_with_stubs.rs`) - nicht erst gesammelt danach in 0.3.x.
 0.3.x ist für die große strukturelle Aufräumung reserviert, siehe dort.
 
-### 0.2.6 - Sprachausgabe über das OpenClaw-Gateway (Piper-Ersatz)
+### 0.2.7 - Sprachausgabe über das OpenClaw-Gateway (Piper-Ersatz)
 
 Eigene Recherche nötig, bevor das begonnen wird: `Gateway-Transcription.md`
 deckt ausschließlich die Transkriptionsrichtung ab (Audio rein), nicht die
@@ -53,7 +53,7 @@ Pfad bzw. `talk.client.create` statt `talk.session.create`.
 ## 0.3.x - Testing & Projektstruktur
 
 Bewusst erst nach dem **kompletten** 0.2.x-Block (inklusive der
-Gateway-Audio-Migration 0.2.5/0.2.6), nicht dazwischengeschoben: Die
+Gateway-Audio-Migration 0.2.5/0.2.7), nicht dazwischengeschoben: Die
 Gateway-Audio-Migration wird voraussichtlich `audio.rs`, `transcribe.rs`,
 `tts.rs` und ggf. `vad.rs` grundlegend anders schneiden als eine reine
 Transport-Umstellung für Textnachrichten - eine Restrukturierung vor
@@ -74,7 +74,7 @@ Regressionstests über den kompletten neuen Pfad.)
 
 | Version | Thema |
 |---|---|
-| 0.3.0 | `src/`-Modulstruktur nach dem kompletten 0.2.x-Block neu ordnen: `openclaw.rs` wird zu einem Modul mit CLI- und WebSocket-Transport (z. B. `src/openclaw/{mod,cli,websocket}.rs`); je nachdem, wie 0.2.5/0.2.6 tatsächlich geschnitten wurden, betrifft das ggf. auch `audio.rs`/`transcribe.rs`/`tts.rs` (lokaler vs. Gateway-Pfad). Exakter Zuschnitt entscheidet sich an der tatsächlichen Größe und Form der 0.2.x-Module, nicht vorab festlegen. |
+| 0.3.0 | `src/`-Modulstruktur nach dem kompletten 0.2.x-Block neu ordnen: `openclaw.rs` wird zu einem Modul mit CLI- und WebSocket-Transport (z. B. `src/openclaw/{mod,cli,websocket}.rs`); je nachdem, wie 0.2.5/0.2.7 tatsächlich geschnitten wurden, betrifft das ggf. auch `audio.rs`/`transcribe.rs`/`tts.rs` (lokaler vs. Gateway-Pfad). Exakter Zuschnitt entscheidet sich an der tatsächlichen Größe und Form der 0.2.x-Module, nicht vorab festlegen. |
 | 0.3.1 | `tests/`-Struktur vor den neuen Regressionstests festlegen: gemeinsame Test-Helfer (Stub-/Mock-Erzeugung wie in `tests/pipeline_with_stubs.rs`) in ein wiederverwendbares Modul auslagern, statt sie in jedem künftigen Feature-Test erneut zu duplizieren |
 | 0.3.2 | Unit-Tests für das Ergebnis der `src/`-Restrukturierung (0.3.0) nachziehen, wo sich durch das Verschieben Lücken ergeben - die fachliche Logik selbst ist bereits aus den 0.2.x-Schritten getestet |
 | 0.3.3 | System-Level-Regressionstest in `tests/` für den kompletten Pfad über alle in 0.2.x aktivierbaren Kombinationen (`transport` x `audio_pipeline`) hinweg, gegen ein Mock-Gateway statt echtem OpenClaw (analog zu `tests/pipeline_with_stubs.rs`) |

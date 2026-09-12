@@ -290,17 +290,16 @@ transport = "websocket"
 gateway_host = "127.0.0.1"  # oder IP/Hostname eines Gateways im LAN/Tailnet
 gateway_port = 18789
 gateway_token = "das-gemeinsame-gateway-token"  # gateway.auth.token
-interim_message = "Einen Moment, ich schaue nach."
 ```
 
 Seit 0.2.2 sendet `transport = "websocket"` echte Nachrichten über
 `chat.send`. Das ist laut Gateway-Protokoll **non-blocking**: die Antwort
-auf den Request selbst ist nur ein sofortiges ACK (`status: "started"`) -
-sobald das ankommt, spricht die Bridge `interim_message` (Pendant zum "Ich
-schau mir das an" aus Telegram), während im Hintergrund auf die
-gestreamten `chat`-Events mit der eigentlichen Antwort gewartet wird.
-Deren `deltaText`-Felder werden zur vollständigen Antwort gesammelt, ein
-`final`-Event schließt die Runde ab. Session-Resets
+auf den Request selbst ist nur ein sofortiges ACK (`status: "started"`),
+danach wartet die Bridge still auf die gestreamten `chat`-Events mit der
+eigentlichen Antwort (0.2.2 hatte hier versuchsweise eine gesprochene
+Zwischenmeldung direkt nach dem ACK - im Feldtest unerwünscht, in 0.2.6
+wieder entfernt). Die `deltaText`-Felder werden zur vollständigen Antwort
+gesammelt, ein `final`-Event schließt die Runde ab. Session-Resets
 (`session_reset_after_secs`) funktionieren über diesen Transport genauso
 wie über CLI, nur eben über `chat.send` statt einen CLI-Aufruf.
 

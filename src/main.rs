@@ -399,15 +399,7 @@ async fn run_round(
         warn!("Leeres Transkript - überspringe OpenClaw-Aufruf");
         String::new()
     } else {
-        match send_to_backend(
-            cfg,
-            shutdown,
-            &transcript,
-            tmp_dir,
-            last_openclaw_message_at,
-        )
-        .await
-        {
+        match send_to_backend(cfg, shutdown, &transcript, last_openclaw_message_at).await {
             Ok(r) => r,
             Err(e) => {
                 transcript_log::log_output(
@@ -534,17 +526,15 @@ async fn transcribe_recording(
 ///
 /// `transport = "cli"` entspricht unverändert dem bisherigen Ablauf
 /// (`openclaw agent --json` je Runde als Subprozess). `transport =
-/// "websocket"` nutzt stattdessen `chat.send`: das sofortige ACK löst über
-/// `on_ack` eine gesprochene Zwischenmeldung aus (Pendant zum "Ich schau mir
-/// das an" aus Telegram, siehe `OpenClawConfig::interim_message`), bevor auf
-/// die gestreamten `deltaText`-Events gewartet wird - `chat.send` selbst ist
-/// laut Protokoll non-blocking und liefert die eigentliche Antwort nicht
-/// direkt zurück.
+/// "websocket"` nutzt stattdessen `chat.send` und wartet still auf die
+/// gestreamten `deltaText`-Events, bis die vollständige Antwort da ist -
+/// ohne gesprochene Zwischenmeldung (0.2.2 hatte hier versuchsweise ein
+/// ACK-getriggertes "Ich schau mir das an", das sich im Feldtest als
+/// unerwünscht herausstellte und in 0.2.6 wieder entfernt wurde).
 async fn send_to_backend(
     cfg: &Config,
     shutdown: &AtomicBool,
     transcript: &str,
-    tmp_dir: &Path,
     last_openclaw_message_at: &mut Option<Instant>,
 ) -> Result<String> {
     match cfg.openclaw.transport {
@@ -585,11 +575,7 @@ async fn send_to_backend(
                 );
                 if let Err(e) = cancellable(
                     shutdown,
-                    gateway_client::send_chat_message(
-                        cfg,
-                        &cfg.openclaw.session_reset_message,
-                        || async {},
-                    ),
+                    gateway_client::send_chat_message(cfg, &cfg.openclaw.session_reset_message),
                 )
                 .await
                 {
@@ -598,19 +584,8 @@ async fn send_to_backend(
             }
 
             let message = openclaw::render_message(&cfg.openclaw, transcript);
-            let tts_cfg = &cfg.tts;
-            let interim_message = &cfg.openclaw.interim_message;
-            let response = cancellable(
-                shutdown,
-                gateway_client::send_chat_message(cfg, &message, || async move {
-                    if let Err(e) =
-                        tts::synthesize_and_play(tts_cfg, interim_message, tmp_dir).await
-                    {
-                        warn!(error = %e, "Konnte Zwischenmeldung nicht abspielen - fahre trotzdem fort");
-                    }
-                }),
-            )
-            .await?;
+            let response =
+                cancellable(shutdown, gateway_client::send_chat_message(cfg, &message)).await?;
             *last_openclaw_message_at = Some(Instant::now());
             Ok(response)
         }

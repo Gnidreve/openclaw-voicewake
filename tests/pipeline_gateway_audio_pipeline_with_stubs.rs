@@ -129,7 +129,6 @@ transport = "websocket"
 audio_pipeline = "gateway"
 gateway_host = "127.0.0.1"
 gateway_port = {port}
-interim_message = "Ich schaue nach."
 
 [tts]
 binary = "{venv_python}"
