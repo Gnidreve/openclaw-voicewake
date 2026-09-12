@@ -2,11 +2,13 @@
 
 Lokaler Sprachdienst für macOS (Apple Silicon):
 
-```
-Wake Word → Mikrofon → VAD/Stille-Erkennung → WAV/PCM → whisper-cli
-   → OpenClaw-CLI → Antworttext → Piper TTS → Mac-Lautsprecher
-```
+![Architektur: Wake Word → Mikrofon → VAD → Transkription → OpenClaw → Sprachausgabe → Lautsprecher, im Kreis zurück zum Wake Word](.docs/architecture.svg)
 
+Transkription und Sprachausgabe sind austauschbar: lokal über
+`whisper-cli`/Piper oder über das OpenClaw-Gateway (`talk.session.*`/
+`tts.speak`), gesteuert durch denselben `audio_pipeline`-Schalter (siehe
+[WebSocket-Gateway-Transport](#websocket-gateway-transport) und
+[Transkription & Sprachausgabe über das Gateway](#transkription--sprachausgabe-über-das-gateway-audio_pipeline--gateway)).
 Alles läuft lokal. Keine Cloud-API, kein Docker, keine dauerhafte
 Audioaufzeichnung.
 
