@@ -25,19 +25,6 @@ veröffentlichte Punkte stehen nicht mehr hier, sondern in
 
 ## Weitere Ideen (unkonkret)
 
-- Wake-Word-Schwellwert: Im Feldtest lagen echte Treffer bei Scores von
-  0.50-0.98, das Grundrauschen aber schon bei ~0.20 - mit `--threshold 0.1`
-  löste der Listener sofort ohne gesprochenes Wake-Word aus. 0.5 ist der
-  aktuelle Arbeitswert, in README und `config.example.toml` als
-  Erfahrungswert dokumentiert. Der Schwellwert lebt im Listener, nicht in
-  der Rust-Binary. Offen: ob der Listener seine Scores dauerhaft mitloggen
-  sollte, um den Wert pro Raum/Mikrofon sauber einstellen zu können.
-  Weiterer Feldtest-Datenpunkt (Wake-Word "Alexa"): Husten sowie
-  gesprochene Wörter mit "A"-Anlaut lösen gelegentlich fälschlich aus -
-  stört aktuell nicht massiv, weil die VAD/Stille-Erkennung solche
-  False-Positives zuverlässig als "keine Sprache" verwirft, bevor etwas
-  ans Gateway/CLI geht (siehe `AGENTS.md`). Bleibt aber ein Kandidat für
-  Schwellwert- oder Modellwahl-Tuning, falls es doch mal stört.
 - Whisper-eigenes VAD (`--vad` mit Silero) würde Halluzinationen aus
   Nicht-Sprache an der Quelle abstellen, nicht nur nachträglich über den
   Transkript-Filter; über `whisper.extra_args` ohne Rust-Änderung testbar.
