@@ -2,7 +2,7 @@
 
 Lokaler Sprachdienst für macOS (Apple Silicon):
 
-![Architektur: Wake Word → Mikrofon → VAD → Transkription → OpenClaw → Sprachausgabe → Lautsprecher, im Kreis zurück zum Wake Word](docs/architecture.svg)
+![Architektur: Wake Word → Mikrofon → VAD → Transkription → OpenClaw → Sprachausgabe → Lautsprecher, im Kreis zurück zum Wake Word](.docs/architecture.svg)
 
 Transkription und Sprachausgabe sind austauschbar: lokal über
 `whisper-cli`/Piper oder über das OpenClaw-Gateway (`talk.session.*`/
