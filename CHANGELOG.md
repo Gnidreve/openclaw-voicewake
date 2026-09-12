@@ -14,6 +14,42 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-08
+
+### Hinzugefügt
+
+- `audio_pipeline = "gateway"` ersetzt jetzt auch die Sprachausgabe: statt
+  des lokalen Piper-Aufrufs synthetisiert ein einzelner `tts.speak`-Aufruf
+  (`gateway_client::synthesize_via_gateway`) die Antwort direkt über das
+  Gateway. Derselbe Schalter wie bei der 0.2.5-Transkription steuert jetzt
+  beide Richtungen (siehe ROADMAP.md).
+- `tts.speak` ist anders als `talk.session.*`/`chat.send` ein einfacher
+  synchroner Request/Response-Aufruf ohne Session-Lifecycle und ohne
+  Events: `{text}` rein, `{audioBase64, provider, outputFormat?,
+  mimeType?, fileExtension?}` direkt in der Antwort raus. Braucht nur den
+  bereits angeforderten `operator.write`-Scope.
+- **Recherche-Ergebnis vor der Implementierung** (ROADMAP.md verlangte das
+  ausdrücklich, da `Gateway-Transcription.md` nur die Transkriptionsrichtung
+  abdeckt): `talk.client.create` ist client-owned und lehnt
+  `transport = "gateway-relay"` explizit ab; `talk.speak` existiert zwar,
+  pinnt aber den separaten Talk-Mode-Provider und braucht den eigenen,
+  nicht angeforderten `operator.talk`-Scope. `tts.speak` ist der für
+  unseren Fall richtige, einfachste Weg.
+- Anders als bei der Transkription ist das zurückgelieferte Audioformat
+  bei `tts.speak` **nicht** fest vorgegeben (abhängig vom serverseitig
+  konfigurierten TTS-Provider, z. B. MP3) - `tts::play_audio_file` (vormals
+  `play_wav`, jetzt auch vom Gateway-Pfad genutzt) spielt es unverändert
+  ab, da `afplay` das Format am Dateiinhalt erkennt, nicht an der Endung.
+  Fehlt `fileExtension` in der Antwort, wird auf `mp3` zurückgefallen.
+- Mock-Gateway-Test (`tests/pipeline_gateway_audio_pipeline_with_stubs.rs`)
+  erweitert: eine Runde bei `audio_pipeline = "gateway"` öffnet jetzt drei
+  unabhängige Gateway-Verbindungen nacheinander (Transkription, `chat.send`,
+  `tts.speak`) - der Test deckt jetzt den kompletten Pfad ab, kein lokaler
+  Piper-Aufruf mehr in diesem Szenario.
+- Damit ist der komplette 0.2.x-Block (WebSocket-Streaming plus
+  Gateway-Audio-Migration) laut ROADMAP.md abgeschlossen - als Nächstes
+  planmäßig 0.3.x (Testing & Projektstruktur).
+
 ## [0.2.6] - 2026-09-08
 
 ### Entfernt
@@ -573,7 +609,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.3...v0.2.4
