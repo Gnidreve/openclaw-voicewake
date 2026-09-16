@@ -1,9 +1,3 @@
 /target
 config.toml
 *.wav
-
-# npx skills add actionbook/rust-skills - lokale Installation, noch nicht
-# reviewt/für das Repo freigegeben (siehe Chat-Rückfrage).
-/.agents/
-/.claude/
-/skills-lock.json
