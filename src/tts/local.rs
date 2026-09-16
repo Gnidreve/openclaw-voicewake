@@ -1,3 +1,8 @@
+//! `audio_pipeline = "local"` (Default, Legacy-Pfad): Piper-Aufruf +
+//! Wiedergabe. `play_audio_file` unten ist eine Ausnahme - die Wiedergabe
+//! bleibt auch für `audio_pipeline = "gateway"` derselbe lokale Player,
+//! siehe [`super::gateway`].
+
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Stdio;
@@ -75,10 +80,9 @@ pub async fn synthesize_and_play(cfg: &TtsConfig, text: &str, tmp_dir: &Path) ->
 /// Spielt eine bereits fertig synthetisierte Audiodatei ab - `afplay`
 /// (Standard) erkennt das Format anhand des Dateiinhalts, nicht nur der
 /// Endung, und spielt WAV/MP3/AAC/Opus etc. gleichermaßen. Wird sowohl vom
-/// lokalen Piper-Pfad oben als auch von
-/// `gateway_client::synthesize_via_gateway` (`audio_pipeline = "gateway"`)
-/// genutzt - eine fertige Audiodatei abzuspielen ist unabhängig davon, wo
-/// sie herkam.
+/// lokalen Piper-Pfad oben als auch von `super::gateway::synthesize_via_gateway`
+/// (`audio_pipeline = "gateway"`) genutzt - eine fertige Audiodatei
+/// abzuspielen ist unabhängig davon, wo sie herkam.
 pub(crate) async fn play_audio_file(cfg: &TtsConfig, path: &Path) -> Result<()> {
     info!(?path, "Spiele Antwort über Standardausgabegerät ab");
     let mut cmd = Command::new(&cfg.player_binary);

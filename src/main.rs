@@ -2,7 +2,7 @@ mod audio;
 mod child_process;
 mod config;
 mod device_identity;
-mod gateway_client;
+mod gateway;
 mod instance_lock;
 mod openclaw;
 mod sound;
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
     // an, deshalb bewusst vor der Einzelinstanz-Sperre und ohne sie - ein
     // parallel laufender echter Zyklus wird dadurch nicht gestört.
     if cli.probe_gateway {
-        return gateway_client::run_read_only_probe(&cfg).await;
+        return openclaw::websocket::run_read_only_probe(&cfg).await;
     }
 
     if cli.dry_run && cli.dry_run_file.is_none() {
@@ -465,11 +465,11 @@ async fn run_round(
 /// Ausgaberichtung (ROADMAP.md: "derselbe `audio_pipeline = \"gateway\"`-
 /// Schalter"). `audio_pipeline = "local"` entspricht unverändert dem
 /// bisherigen Piper-Aufruf. `audio_pipeline = "gateway"` ersetzt das durch
-/// `tts.speak` (siehe `gateway_client::synthesize_via_gateway`) - anders als
+/// `tts.speak` (siehe `tts::gateway::synthesize_via_gateway`) - anders als
 /// bei der Transkription ist das dort zurückgelieferte Audioformat nicht
 /// fest vorgegeben (abhängig vom serverseitig konfigurierten TTS-Provider),
-/// `tts::play_audio_file` spielt es trotzdem unverändert ab, da `afplay`
-/// das Format am Dateiinhalt erkennt, nicht an der Endung.
+/// `tts::local::play_audio_file` spielt es trotzdem unverändert ab, da
+/// `afplay` das Format am Dateiinhalt erkennt, nicht an der Endung.
 async fn speak_response(
     cfg: &Config,
     shutdown: &AtomicBool,
@@ -480,14 +480,14 @@ async fn speak_response(
         config::AudioPipeline::Local => {
             cancellable(
                 shutdown,
-                tts::synthesize_and_play(&cfg.tts, response, tmp_dir),
+                tts::local::synthesize_and_play(&cfg.tts, response, tmp_dir),
             )
             .await
         }
         config::AudioPipeline::Gateway => {
             cancellable(
                 shutdown,
-                gateway_client::synthesize_via_gateway(cfg, response, tmp_dir),
+                tts::gateway::synthesize_via_gateway(cfg, response, tmp_dir),
             )
             .await
         }
@@ -501,7 +501,7 @@ async fn speak_response(
 /// `audio_pipeline = "local"` entspricht unverändert dem bisherigen Ablauf
 /// (ffmpeg-Normalisierung + `whisper-cli`). `audio_pipeline = "gateway"`
 /// ersetzt das durch eine Gateway-Talk-Transkriptionssession (siehe
-/// `gateway_client::transcribe_via_gateway`) - die Audiokonvertierung
+/// `transcribe::gateway::transcribe_via_gateway`) - die Audiokonvertierung
 /// (dort: G.711 mu-law/8kHz statt 16kHz PCM) läuft dabei innerhalb dieser
 /// Funktion, nicht hier.
 async fn transcribe_recording(
@@ -515,7 +515,7 @@ async fn transcribe_recording(
             let normalized_wav = tmp_dir.join("normalized.wav");
             cancellable(
                 shutdown,
-                transcribe::normalize_audio(
+                transcribe::local::normalize_audio(
                     &cfg.general,
                     raw_wav,
                     &normalized_wav,
@@ -526,7 +526,7 @@ async fn transcribe_recording(
 
             let t = cancellable(
                 shutdown,
-                transcribe::transcribe(&cfg.whisper, &normalized_wav, tmp_dir),
+                transcribe::local::transcribe(&cfg.whisper, &normalized_wav, tmp_dir),
             )
             .await?;
 
@@ -541,7 +541,7 @@ async fn transcribe_recording(
         config::AudioPipeline::Gateway => {
             cancellable(
                 shutdown,
-                gateway_client::transcribe_via_gateway(cfg, raw_wav),
+                transcribe::gateway::transcribe_via_gateway(cfg, raw_wav),
             )
             .await
         }
@@ -577,7 +577,7 @@ async fn send_to_backend(
             // funktionierende Runde abbrechen.
             if let Err(e) = cancellable(
                 shutdown,
-                openclaw::maybe_reset_session(&cfg.openclaw, *last_openclaw_message_at),
+                openclaw::cli::maybe_reset_session(&cfg.openclaw, *last_openclaw_message_at),
             )
             .await
             {
@@ -586,7 +586,7 @@ async fn send_to_backend(
 
             let response = cancellable(
                 shutdown,
-                openclaw::send_to_openclaw(&cfg.openclaw, transcript),
+                openclaw::cli::send_to_openclaw(&cfg.openclaw, transcript),
             )
             .await?;
             *last_openclaw_message_at = Some(Instant::now());
@@ -604,7 +604,10 @@ async fn send_to_backend(
                 );
                 if let Err(e) = cancellable(
                     shutdown,
-                    gateway_client::send_chat_message(cfg, &cfg.openclaw.session_reset_message),
+                    openclaw::websocket::send_chat_message(
+                        cfg,
+                        &cfg.openclaw.session_reset_message,
+                    ),
                 )
                 .await
                 {
@@ -613,8 +616,11 @@ async fn send_to_backend(
             }
 
             let message = openclaw::render_message(&cfg.openclaw, transcript);
-            let response =
-                cancellable(shutdown, gateway_client::send_chat_message(cfg, &message)).await?;
+            let response = cancellable(
+                shutdown,
+                openclaw::websocket::send_chat_message(cfg, &message),
+            )
+            .await?;
             *last_openclaw_message_at = Some(Instant::now());
             Ok(response)
         }

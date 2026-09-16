@@ -14,6 +14,38 @@ veröffentlicht ist, und wird dann aus der Roadmap gelöscht.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-12
+
+### Geändert
+
+- `src/`-Modulstruktur nach dem kompletten 0.2.x-Block (WebSocket-Streaming
+  + Gateway-Audio-Migration) neu geordnet - reine Restrukturierung, kein
+  neues Nutzerverhalten. Spiegelt jetzt direkt die beiden Config-Schalter:
+  - `openclaw.rs` → `openclaw/{mod,cli,websocket}.rs`: `cli` ist der
+    bisherige CLI-Subprozess-Pfad (`transport = "cli"`), `websocket` das
+    bisherige `chat.send`/`--probe-gateway` (`transport = "websocket"`).
+    `render_message`/`reset_due` sind transportunabhängig und bleiben in
+    `mod.rs`.
+  - `transcribe.rs` → `transcribe/{mod,local,gateway}.rs`: `local` ist der
+    bisherige ffmpeg+whisper-cli-Pfad, `gateway` die bisher in
+    `gateway_client.rs` mitgeführten `talk.session.*`-Aufrufe
+    (`audio_pipeline = "gateway"`).
+  - `tts.rs` → `tts/{mod,local,gateway}.rs`: `local` ist der bisherige
+    Piper-Pfad, `gateway` das bisher in `gateway_client.rs` mitgeführte
+    `tts.speak` (`audio_pipeline = "gateway"`).
+  - `gateway_client.rs` aufgelöst: die gemeinsame Low-Level-Verbindung
+    (Connect-Handshake, Frame-IO, `sessions.messages.subscribe`) liegt jetzt
+    in `gateway.rs` - gemeinsame Basis für `openclaw::websocket`,
+    `transcribe::gateway` und `tts::gateway`, die weiterhin jeweils ihre
+    eigene WebSocket-Verbindung aufbauen statt eine Session zu teilen.
+- Unit-Tests sind mit ihrem Code gewandert (Konvention: Tests direkt in der
+  jeweiligen Datei) - keine Testlogik geändert, alle 166 Unit-Tests plus
+  alle Integrationstests bleiben unverändert grün.
+- Alle Aufrufstellen in `main.rs`/`config.rs` (u. a.
+  `gateway_client::run_read_only_probe`, `gateway_client::transcribe_via_gateway`,
+  `gateway_client::synthesize_via_gateway`) auf die neuen Modulpfade
+  umgestellt.
+
 ## [0.2.7] - 2026-09-08
 
 ### Hinzugefügt
@@ -609,7 +641,8 @@ Erste Veröffentlichung.
 - `wakeword.restart_delay_ms` war definiert, wurde aber nirgends gelesen: Ein
   dauerhaft fehlschlagendes Wake-Word-Kommando lief ungebremst im Busy-Loop.
 
-[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Gnidreve/openclaw-voicewake/compare/v0.2.4...v0.2.5
